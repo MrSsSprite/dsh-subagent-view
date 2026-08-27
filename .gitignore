@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+lib/
+dist/
+*.tsbuildinfo
+
+# Team working material (not part of the plugin package)
+.agent-teams/
+.research/
+.scratch/
+.verify/
+DEV-NOTES.md
+
+# Misc
+*.log
+.DS_Store
