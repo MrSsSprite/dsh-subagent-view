@@ -269,7 +269,11 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
       {monitor.open
         ? (
           <div className="sav-panel">
-            <div className="sav-panel-header">
+            <div
+              className="sav-panel-header"
+              title="Collapse panel"
+              onClick={() => commit({ open: false })}
+            >
               <span className="sav-panel-title">Subagents</span>
               {subagentParent !== undefined && sessionsSvc !== undefined
                 ? (
@@ -277,7 +281,10 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
                     className="sav-btn sav-back"
                     type="button"
                     title="Back to main session"
-                    onClick={() => sessionsSvc?.open(subagentParent as SessionId)}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      sessionsSvc?.open(subagentParent as SessionId)
+                    }}
                   >
                     ← Main session
                   </button>
@@ -285,17 +292,6 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
                 : null}
               <span className="sav-panel-spacer" />
               {running > 0 ? <span className="sav-panel-running">{running} running</span> : null}
-              <button
-                className="sav-btn"
-                type="button"
-                title="Collapse panel"
-                onClick={() => commit({ open: false })}
-              >
-                ▴
-              </button>
-              <button className="sav-btn" type="button" title="Close panel" onClick={() => commit({ open: false })}>
-                ✕
-              </button>
             </div>
             {visible.length === 0
               ? (

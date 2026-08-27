@@ -81,7 +81,9 @@ export function apply(ctx: ClientContext): void {
   padding: 7px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.06));
   user-select: none;
+  cursor: pointer;
 }
+.sav-panel-header:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04)); }
 .sav-panel-title { flex: none; font-weight: 600; font-size: 13px; line-height: 18px; }
 .sav-panel-running {
   flex: none; color: var(--dsw-alias-brand-primary, #2563eb); font-size: 11px;
