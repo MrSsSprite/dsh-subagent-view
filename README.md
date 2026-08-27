@@ -31,10 +31,17 @@ panel, so nothing ever covers the conversation.
 
 ## Install
 
-Install from a local checkout into a DSH profile (adjust the path and profile name):
+Build once from a clean tree (all three must pass):
 
 ```bash
-dsh plugin --profile web add "file:/path/to/subagent-view"
+cd /home/archeus/codespace/dsh-plugin/subagent-view
+pnpm install && pnpm build && pnpm typecheck
+```
+
+Then install into the `web` profile (adjust the path for other machines):
+
+```bash
+dsh plugin --profile web add "file:/home/archeus/codespace/dsh-plugin/subagent-view"
 ```
 
 `dsh plugin add` appends `subagent-view` to the profile's `dsh.profile.bundles` automatically
@@ -42,16 +49,51 @@ because the package declares `dsh.bundle`. Restart `dsh web` once so the new plu
 picked up:
 
 ```bash
+# stop the process serving 127.0.0.1:3080, then:
 dsh web --host 127.0.0.1 --port 3080
 ```
 
-Manual equivalent (no CLI): add `"subagent-view": "file:/path/to/subagent-view"` to
-`dependencies` in the profile's `package.json`, append `"subagent-view"` to
-`dsh.profile.bundles`, then run `pnpm install` inside the profile directory.
+Manual equivalent (no CLI): add
+`"subagent-view": "file:/home/archeus/codespace/dsh-plugin/subagent-view"` to `dependencies`
+in `/home/archeus/.dsh/profiles/web/package.json`, append `"subagent-view"` to
+`dsh.profile.bundles`, then run `pnpm install` inside the profile directory. Back up the
+profile manifest first:
+
+```bash
+cd /home/archeus/.dsh/profiles/web
+cp package.json package.json.bak-sv && cp pnpm-lock.yaml lock.bak-sv
+```
+
+Profile files live outside this repo and require an unsandboxed shell (sandboxed agents see the
+profile mounted read-only).
 
 After the first install, client-side rebuilds hot-apply: run `pnpm build` in this repo and the
 open page updates within about a second (no restart). Host-side changes require one `dsh web`
 restart.
+
+### Verify (no browser needed)
+
+```bash
+# graph row present (also proves the boot protocol):
+curl -s http://127.0.0.1:3080/ | grep -o '{"id":"subagent-view"[^}]*}'
+
+# the reference plugin still coexists:
+curl -s http://127.0.0.1:3080/ | grep -o '{"id":"@leetoners/dsh-ui-subagent-monitor"[^}]*}'
+
+# client bundle served with the module-loader wrapper:
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' http://127.0.0.1:3080/plugins/subagent-view/client.js
+curl -s 'http://127.0.0.1:3080/plugins/subagent-view/client.js?rev=0' | head -c 120
+
+# snapshot endpoint, canonical wire contract:
+curl -s 'http://127.0.0.1:3080/api/subagent-view/snapshot?sessionId=test-abc'
+# → {"sessionId":"test-abc","now":<ms>,"rows":[...]}
+curl -s 'http://127.0.0.1:3080/api/subagent-view/snapshot'
+# → {"now":<ms>,"rows":[]}   (sessionId key omitted when the param is absent)
+
+# the reference route still answers (coexistence):
+curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:3080/api/subagent-monitor/snapshot?sessionId=test-abc'
+# → 200
+```
 
 ## Status legend
 
