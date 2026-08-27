@@ -31,17 +31,20 @@ panel, so nothing ever covers the conversation.
 
 ## Install
 
+> Replace `<repo>` with the absolute path to this repository and `<profile-dir>` with your DSH
+> profile directory (e.g. `~/.dsh/profiles/web`).
+
 Build once from a clean tree (all three must pass):
 
 ```bash
-cd /home/archeus/codespace/dsh-plugin/subagent-view
+cd <repo>
 pnpm install && pnpm build && pnpm typecheck
 ```
 
 Then install into the `web` profile (adjust the path for other machines):
 
 ```bash
-dsh plugin --profile web add "file:/home/archeus/codespace/dsh-plugin/subagent-view"
+dsh plugin --profile web add "file:<repo>"
 ```
 
 `dsh plugin add` appends `subagent-view` to the profile's `dsh.profile.bundles` automatically
@@ -54,13 +57,13 @@ dsh web --host 127.0.0.1 --port 3080
 ```
 
 Manual equivalent (no CLI): add
-`"subagent-view": "file:/home/archeus/codespace/dsh-plugin/subagent-view"` to `dependencies`
-in `/home/archeus/.dsh/profiles/web/package.json`, append `"subagent-view"` to
+`"subagent-view": "file:<repo>"` to `dependencies`
+in `<profile-dir>/package.json`, append `"subagent-view"` to
 `dsh.profile.bundles`, then run `pnpm install` inside the profile directory. Back up the
 profile manifest first:
 
 ```bash
-cd /home/archeus/.dsh/profiles/web
+cd <profile-dir>
 cp package.json package.json.bak-sv && cp pnpm-lock.yaml lock.bak-sv
 ```
 
