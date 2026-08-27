@@ -80,9 +80,6 @@ restart.
 # graph row present (also proves the boot protocol):
 curl -s http://127.0.0.1:3080/ | grep -o '{"id":"subagent-view"[^}]*}'
 
-# the reference plugin still coexists:
-curl -s http://127.0.0.1:3080/ | grep -o '{"id":"@leetoners/dsh-ui-subagent-monitor"[^}]*}'
-
 # client bundle served with the module-loader wrapper:
 curl -s -o /dev/null -w '%{http_code} %{content_type}\n' http://127.0.0.1:3080/plugins/subagent-view/client.js
 curl -s 'http://127.0.0.1:3080/plugins/subagent-view/client.js?rev=0' | head -c 120
@@ -92,10 +89,19 @@ curl -s 'http://127.0.0.1:3080/api/subagent-view/snapshot?sessionId=test-abc'
 # → {"sessionId":"test-abc","now":<ms>,"rows":[...]}
 curl -s 'http://127.0.0.1:3080/api/subagent-view/snapshot'
 # → {"now":<ms>,"rows":[]}   (sessionId key omitted when the param is absent)
+```
 
-# the reference route still answers (coexistence):
+### Coexistence with the reference plugin (only when it is enabled)
+
+The reference `@leetoners/dsh-ui-subagent-monitor` may stay installed next to this plugin. These
+two checks only apply when its fiber is ENABLED in the profile — this development environment
+deliberately disables it (profile `cordis.patch.yml`: `- id: ui-subagent-monitor / disabled: true`),
+so there the row is absent and the route answers 404 by design:
+
+```bash
+curl -s http://127.0.0.1:3080/ | grep -o '{"id":"@leetoners/dsh-ui-subagent-monitor"[^}]*}'
 curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:3080/api/subagent-monitor/snapshot?sessionId=test-abc'
-# → 200
+# → 200 when enabled
 ```
 
 ## Status legend
