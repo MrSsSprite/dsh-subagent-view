@@ -172,7 +172,7 @@ if the captain wants the literal label. No other parity gaps found.
 
 All claims re-verified live by the reviewer at 127.0.0.1:3080:
 - `~/.dsh/profiles/web/package.json`: `dependencies."subagent-view" =
-  "link:/home/archeus/codespace/dsh-plugin/subagent-view"` and `"subagent-view"`
+  "link:<repo>"` (a live symlink to this repository) and `"subagent-view"`
   in `dsh.profile.bundles` (after the reference entry, which remains listed as a
   dependency) ✓; backups `package.json.bak-sv` + `lock.bak-sv` exist ✓; profile
   `node_modules/subagent-view` symlinks to the workspace ✓.
