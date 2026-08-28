@@ -144,6 +144,21 @@ function StatusDot({ status }: { status: string }): ReactElement {
   return <span className={`sav-dot ${meta.cls}`} aria-hidden="true" />
 }
 
+/** One "n ●" count segment in the stats line; non-first segments lead with a separator. */
+function CountSegment({ count, status, first }: {
+  count: number
+  status: 'running' | 'completed' | 'error'
+  first: boolean
+}): ReactElement {
+  return (
+    <span className="sav-count-seg">
+      {first ? null : <span className="sav-count-sep" aria-hidden="true">·</span>}
+      <span className="sav-count-num">{count}</span>
+      <StatusDot status={status} />
+    </span>
+  )
+}
+
 function fmtDuration(start: number | undefined, end: number | undefined): string {
   if (start === undefined) return '—'
   const ms = (end ?? Date.now()) - start
@@ -262,7 +277,28 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
     )
   }
 
-  const stats = `${running} running · ${done} done · ${failed} failed`
+  // Count segments only shown when non-zero; "None" when every type is 0.
+  // Dots follow the status legend: running = animated blue, done = green,
+  // failed = red.
+  const segments = [
+    { status: 'running' as const, count: running },
+    { status: 'completed' as const, count: done },
+    { status: 'error' as const, count: failed },
+  ].filter(segment => segment.count > 0)
+  const statsEl = segments.length === 0
+    ? <span className="sav-stats sav-stats-none">None</span>
+    : (
+      <span className="sav-stats">
+        {segments.map((segment, index) => (
+          <CountSegment
+            key={segment.status}
+            count={segment.count}
+            status={segment.status}
+            first={index === 0}
+          />
+        ))}
+      </span>
+      )
 
   return (
     <div className="sav-root">
@@ -337,7 +373,7 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
                 </div>
                 )}
             <div className="sav-panel-footer">
-              <span className="sav-panel-stats">{stats}</span>
+              <span className="sav-panel-stats">{statsEl}</span>
               <span className="sav-panel-spacer" />
               {monitor.hidden.length > 0
                 ? (
@@ -365,7 +401,7 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
         : null}
       <button className="sav-bar" type="button" title="Subagent runs" onClick={() => commit({ open: !state.open })}>
         <span className="sav-bar-label">Subagents</span>
-        <span className="sav-bar-stats">{stats}</span>
+        <span className="sav-bar-stats">{statsEl}</span>
         <span className={`sav-bar-chevron${monitor.open ? ' sav-bar-chevron-open' : ''}`} aria-hidden="true">▾</span>
       </button>
     </div>

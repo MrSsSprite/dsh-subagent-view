@@ -1,9 +1,10 @@
 # subagent-view
 
 A DeepSeek Harness (DSH) web extension that monitors subagent runs **inside the left sidebar**.
-A persistent status bar docked at the bottom of the sidebar shows
-`n running · m done · k failed` at a glance; clicking it expands a full panel — still inside the
-sidebar column — listing every subagent of the current session as a live tree.
+A persistent status bar docked at the bottom of the sidebar shows the counts at a glance as
+colored dots — `n ● · m ● · k ●` (blue = running, green = done, red = failed), hiding
+zero-count types and showing `None` when all are zero; clicking it expands a full panel —
+still inside the sidebar column — listing every subagent of the current session as a live tree.
 
 The plugin is a from-scratch, English-language reimplementation of the MIT-licensed
 [`@leetoners/dsh-ui-subagent-monitor`](https://github.com/Mombrane/dsh-subagent-monitor). It keeps
@@ -13,8 +14,9 @@ panel, so nothing ever covers the conversation.
 ## Features
 
 - **Docked bar + expandable panel.** One persistent entry at the bottom of the left sidebar:
-  `n running · m done · k failed`. Click to expand the full panel above the bar; the workspace
-  browser above simply shrinks — no overlay, no portal.
+  a dot count `n ● · m ● · k ●` (blue = running, green = done, red = failed), with zero-count
+  types omitted and `None` shown when all counts are zero. Click to expand the full panel above
+  the bar; the workspace browser above simply shrinks — no overlay, no portal.
 - **Live statuses.** Each row shows a status dot and duration: running (animated blue),
   completed (green), error (red), interrupted/token-limit/refused (amber), and history-only
   rows (gray).

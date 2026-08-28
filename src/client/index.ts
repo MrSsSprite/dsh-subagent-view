@@ -43,7 +43,13 @@ export function apply(ctx: ClientContext): void {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--dsw-alias-label-tertiary, #94a3b8);
   font-variant-numeric: tabular-nums;
+  display: flex; align-items: center;
 }
+.sav-stats { display: inline-flex; align-items: center; gap: 6px; }
+.sav-stats-none { color: var(--dsw-alias-label-tertiary, #94a3b8); }
+.sav-count-seg { display: inline-flex; align-items: center; gap: 3px; }
+.sav-count-sep { color: var(--dsw-alias-label-tertiary, #94a3b8); }
+.sav-count-num { font-variant-numeric: tabular-nums; }
 .sav-bar-chevron {
   flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
   font-size: 10px; transition: transform var(--ds-transition-duration-slow, 160ms) var(--ds-ease-in-out, ease-in-out);
@@ -157,6 +163,7 @@ export function apply(ctx: ClientContext): void {
 .sav-panel-stats {
   flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8); font-size: 11px;
   font-variant-numeric: tabular-nums;
+  display: flex; align-items: center;
 }
 .sav-btn {
   flex: none;
