@@ -244,16 +244,30 @@ function detailsFields(row: TabRow): [string, string][] {
   return fields
 }
 
-function DetailsBlock({ row }: { row: TabRow }): ReactElement {
+/**
+ * Floating details window: the friendly overview fields first, then the raw
+ * wire fields, divided by a hairline. Anchored to the row card (absolute,
+ * `top: 100%`), like the old raw-fields popover.
+ */
+function DetailsPopover({ row }: { row: TabRow }): ReactElement {
+  const overview = detailsFields(row)
+  const raw = rawFields(row)
   return (
-    <dl className="sat-details">
-      {detailsFields(row).map(([key, value]) => (
-        <Fragment key={key}>
-          <dt>{key}</dt>
-          <dd>{value}</dd>
-        </Fragment>
+    <div className="sat-popover">
+      {overview.map(([key, value]) => (
+        <div key={key} className="sat-pop-row">
+          <span className="sat-pop-key">{key}:</span>
+          <span className="sat-pop-value">{value}</span>
+        </div>
       ))}
-    </dl>
+      {raw.length > 0 ? <div className="sat-pop-div" aria-hidden="true" /> : null}
+      {raw.map(([key, value]) => (
+        <div key={key} className="sat-pop-row">
+          <span className="sat-pop-key">{key}:</span>
+          <span className="sat-pop-value">{value}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -268,19 +282,6 @@ function rawFields(row: TabRow): [string, string][] {
   fields.push(['isCurrent', String(row.isCurrent)])
   if (row.purpose !== undefined) fields.push(['purpose', row.purpose])
   return fields
-}
-
-function RawPopover({ row }: { row: TabRow }): ReactElement {
-  return (
-    <div className="sat-popover">
-      {rawFields(row).map(([key, value]) => (
-        <div key={key} className="sat-pop-row">
-          <span className="sat-pop-key">{key}:</span>
-          <span className="sat-pop-value">{value}</span>
-        </div>
-      ))}
-    </div>
-  )
 }
 
 // ---- component ----
@@ -317,9 +318,8 @@ export function SubagentsView(props: TabProps): ReactElement {
     }
   }, [])
 
-  // Per-row expanded blocks, keyed by row id.
+  // Per-row floating details windows, keyed by row id.
   const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(() => new Set())
-  const [rawOpen, setRawOpen] = useState<ReadonlySet<string>>(() => new Set())
 
   // Branch collapse state, keyed by row id. Empty set = every branch expanded,
   // which is the tab's default; a branch toggled shut stays collapsed across
@@ -443,21 +443,12 @@ export function SubagentsView(props: TabProps): ReactElement {
                         >
                           ⓘ
                         </button>
-                        <button
-                          className="sat-row-btn"
-                          type="button"
-                          title="Raw fields"
-                          onClick={() => setRawOpen(prev => toggleMember(prev, row.id))}
-                        >
-                          …
-                        </button>
                       </span>
                     </div>
                     {typeof row.purpose === 'string' && row.purpose !== ''
                       ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
                       : null}
-                    {detailsOpen.has(row.id) ? <DetailsBlock row={row} /> : null}
-                    {rawOpen.has(row.id) ? <RawPopover row={row} /> : null}
+                    {detailsOpen.has(row.id) ? <DetailsPopover row={row} /> : null}
                   </div>
                 )
               }}

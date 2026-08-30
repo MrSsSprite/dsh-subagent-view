@@ -370,17 +370,6 @@ export function apply(ctx: ClientContext): void {
   font-size: 11px; line-height: 16px;
   margin-top: 2px; padding-left: 22px;
 }
-.sat-details {
-  display: grid; grid-template-columns: max-content 1fr;
-  column-gap: 12px; row-gap: 2px;
-  margin: 6px 0 0; padding: 6px 8px 0 22px;
-  border-top: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.06));
-}
-.sat-details dt, .sat-details dd {
-  font-size: 12px; line-height: 18px; margin: 0;
-  color: var(--dsw-alias-label-tertiary, #94a3b8);
-  font-weight: 400;
-}
 .sat-popover {
   position: absolute; right: 8px; top: 100%; z-index: 20;
   margin-top: 4px; min-width: 240px; max-width: 320px;
@@ -389,6 +378,10 @@ export function apply(ctx: ClientContext): void {
   border-radius: 8px;
   box-shadow: var(--dsw-shadow-lv2, 0 8px 24px rgba(15, 23, 42, 0.12));
   padding: 6px 8px;
+}
+.sat-pop-div {
+  margin: 4px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.06));
 }
 .sat-pop-row { display: flex; gap: 8px; }
 .sat-pop-key {
