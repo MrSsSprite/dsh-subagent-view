@@ -3,10 +3,13 @@
  *
  * One list entry in the `conversation.view` slot renders the root→current
  * breadcrumb, the running/done/failed summary strip, and the host-order
- * subagent tree. The tab polls the host half's `/api/subagent-view/tab`
- * route once per second while mounted, so a page refresh recovers the whole
- * forest without any model interaction. All styling lives in the single
- * `<style data-plugin="subagent-view">` tag in src/client/index.ts.
+ * subagent tree. The tree follows the DSH-canonical disclosure visual
+ * (chevron-right ">" that rotates downward when expanded, gray "L"-shape
+ * guide lines), fully expanded by default. The tab polls the host half's
+ * `/api/subagent-view/tab` route once per second while mounted, so a page
+ * refresh recovers the whole forest without any model interaction. All
+ * styling lives in the single `<style data-plugin="subagent-view">` tag in
+ * src/client/index.ts.
  */
 import {
   Fragment,
@@ -16,6 +19,7 @@ import {
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client' // adds 'conversation.view' to SlotMap
 import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
+import { SubagentTree, type TreeRowContext } from './tree'
 
 // ---- wire shape shared with the node half ----
 
@@ -317,6 +321,15 @@ export function SubagentsView(props: TabProps): ReactElement {
   const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(() => new Set())
   const [rawOpen, setRawOpen] = useState<ReadonlySet<string>>(() => new Set())
 
+  // Branch collapse state, keyed by row id. Empty set = every branch expanded,
+  // which is the tab's default; a branch toggled shut stays collapsed across
+  // the 1s polls (ids are stable for the life of the session).
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+
+  const toggleBranch = (id: string): void => {
+    setCollapsed(prev => toggleMember(prev, id))
+  }
+
   const { ancestors, rows, now } = tab
   const running = rows.filter(row => row.status === 'running').length
   const done = rows.filter(row => row.status === 'completed').length
@@ -393,60 +406,62 @@ export function SubagentsView(props: TabProps): ReactElement {
           )
         : (
           <div className="sat-tree">
-            {rows.map(row => {
-              const depth = typeof row.depth === 'number' ? row.depth : 0
-              const indent = Math.max(0, depth) * 14
-              const label = rowLabel(row)
-              const activeMs = activeMsFor(row, now)
-              return (
-                <div
-                  key={row.id}
-                  className={`sat-row${row.isCurrent ? ' sat-row-current' : ''}`}
-                  style={{ marginLeft: indent }}
-                >
-                  {indent > 0 ? <span className="sat-row-guide" aria-hidden="true" /> : null}
-                  <div className="sat-row-main">
-                    <StatusDot status={row.status} />
-                    <ModeChip mode={row.mode} />
-                    <span className="sat-label" title={label}>{label}</span>
-                    {typeof row.provider === 'string' && row.provider !== ''
-                      ? <span className="sat-provider-chip">{providerChipText(row.provider)}</span>
+            <SubagentTree
+              rows={rows}
+              collapsed={collapsed}
+              onToggle={toggleBranch}
+              cls="sat"
+              renderRow={(row, ctx: TreeRowContext) => {
+                const label = rowLabel(row)
+                const activeMs = activeMsFor(row, now)
+                return (
+                  <div
+                    className={`sat-row${row.isCurrent ? ' sat-row-current' : ''}${ctx.expanded && ctx.hasChildren ? ' sat-row-branch-open' : ''}`}
+                  >
+                    <div className="sat-row-main">
+                      {ctx.disclosure}
+                      <StatusDot status={row.status} />
+                      <ModeChip mode={row.mode} />
+                      <span className="sat-label" title={label}>{label}</span>
+                      {typeof row.provider === 'string' && row.provider !== ''
+                        ? <span className="sat-provider-chip">{providerChipText(row.provider)}</span>
+                        : null}
+                      <span className="sat-metrics">
+                        {row.tokens !== undefined
+                          ? <span className="sat-metric-token">{fmtTokens(row.tokens)} tok</span>
+                          : null}
+                        {activeMs !== undefined
+                          ? <span className="sat-metric-duration">{fmtDuration(0, activeMs)}</span>
+                          : null}
+                      </span>
+                      <span className="sat-row-actions">
+                        <button
+                          className="sat-row-btn"
+                          type="button"
+                          title="Details"
+                          onClick={() => setDetailsOpen(prev => toggleMember(prev, row.id))}
+                        >
+                          ⓘ
+                        </button>
+                        <button
+                          className="sat-row-btn"
+                          type="button"
+                          title="Raw fields"
+                          onClick={() => setRawOpen(prev => toggleMember(prev, row.id))}
+                        >
+                          …
+                        </button>
+                      </span>
+                    </div>
+                    {typeof row.purpose === 'string' && row.purpose !== ''
+                      ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
                       : null}
-                    <span className="sat-metrics">
-                      {row.tokens !== undefined
-                        ? <span className="sat-metric-token">{fmtTokens(row.tokens)} tok</span>
-                        : null}
-                      {activeMs !== undefined
-                        ? <span className="sat-metric-duration">{fmtDuration(0, activeMs)}</span>
-                        : null}
-                    </span>
-                    <span className="sat-row-actions">
-                      <button
-                        className="sat-row-btn"
-                        type="button"
-                        title="Details"
-                        onClick={() => setDetailsOpen(prev => toggleMember(prev, row.id))}
-                      >
-                        ⓘ
-                      </button>
-                      <button
-                        className="sat-row-btn"
-                        type="button"
-                        title="Raw fields"
-                        onClick={() => setRawOpen(prev => toggleMember(prev, row.id))}
-                      >
-                        …
-                      </button>
-                    </span>
+                    {detailsOpen.has(row.id) ? <DetailsBlock row={row} /> : null}
+                    {rawOpen.has(row.id) ? <RawPopover row={row} /> : null}
                   </div>
-                  {typeof row.purpose === 'string' && row.purpose !== ''
-                    ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
-                    : null}
-                  {detailsOpen.has(row.id) ? <DetailsBlock row={row} /> : null}
-                  {rawOpen.has(row.id) ? <RawPopover row={row} /> : null}
-                </div>
-              )
-            })}
+                )
+              }}
+            />
           </div>
           )}
     </div>

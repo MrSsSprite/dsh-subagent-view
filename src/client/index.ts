@@ -106,11 +106,13 @@ export function apply(ctx: ClientContext): void {
 }
 .sav-empty { flex: 1; padding: 24px 12px; text-align: center; color: var(--dsw-alias-label-tertiary, #94a3b8); }
 .sav-row {
-  flex: none;
+  flex: none; position: relative;
   background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.6));
   border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.07));
   border-radius: 8px;
-  padding: 6px 8px;
+  /* 11px left pad + 14px disclosure box puts the chevron center at x=18px,
+     the column the tree guide lines run through. */
+  padding: 7px 8px 7px 11px;
 }
 .sav-row-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sav-dot { width: 10px; height: 10px; flex: none; }
@@ -145,7 +147,7 @@ export function apply(ctx: ClientContext): void {
 }
 .sav-row-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-top: 2px; padding-left: 18px;
+  margin-top: 2px; padding-left: 22px;
 }
 .sav-row-time {
   flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
@@ -178,6 +180,61 @@ export function apply(ctx: ClientContext): void {
   background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
 }
 .sav-back { color: var(--dsw-alias-brand-primary, #2563eb); border-color: var(--dsw-alias-brand-primary, #2563eb); }
+/* ---- canonical disclosure tree (shared by the sidebar panel "sav" and the
+   Subagents tab "sat") — faithful port of the authority visual from
+   @deepseek-ai/dsh-client-ui-subagent: a chevron-right ">" to the left of
+   rows that have children (it rotates 90° to point downward when the branch
+   expands) plus gray "L"-shape guide lines marking parent-child links. ----
+   Geometry: row cards are padded 11px left, so the 14px chevron's center
+   sits at x=18px; each child level is offset 22px (18px margin + 4px
+   padding) and its rows carry the guide lines through the parent's chevron
+   column (x=-4px relative to the node) with a 14px horizontal tick reaching
+   each child's chevron (top:16px = its vertical center). */
+.sav-disclosure, .sat-disclosure {
+  flex: none; align-self: flex-start;
+  width: 14px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; padding: 0; background: transparent;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  cursor: pointer;
+  transition: transform 120ms var(--ds-ease-in-out, ease-in-out);
+}
+.sav-disclosure:hover, .sat-disclosure:hover { color: var(--dsw-alias-label-primary, inherit); }
+.sav-disclosure-open, .sat-disclosure-open { transform: rotate(90deg); }
+.sav-disclosure-space, .sat-disclosure-space {
+  flex: none; align-self: flex-start;
+  width: 14px; height: 18px;
+}
+.sav-node, .sat-node {
+  position: relative; min-width: 0;
+  display: flex; flex-direction: column;
+}
+.sav-children, .sat-children {
+  position: relative;
+  margin-left: 18px; padding-left: 4px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+/* Vertical guide line through the parent's chevron column: one per child,
+   spanning its whole subtree. The 6px downward overhang bridges the inter-row
+   gap so the line stays continuous; the last sibling stops at its tick. */
+.sav-children > .sav-node::before, .sat-children > .sat-node::before {
+  content: ''; position: absolute; top: 0; bottom: -6px; left: -4px;
+  border-left: 1px solid var(--dsw-alias-border-l2, rgba(15, 23, 42, 0.18));
+}
+.sav-children > .sav-node:last-child::before, .sat-children > .sat-node:last-child::before {
+  height: 17px; bottom: auto;
+}
+/* Horizontal tick from the parent's line into each child row's chevron. */
+.sav-children > .sav-node > .sav-row::before, .sat-children > .sat-node > .sat-row::before {
+  content: ''; position: absolute; top: 16px; left: -4px; width: 14px;
+  border-top: 1px solid var(--dsw-alias-border-l2, rgba(15, 23, 42, 0.18));
+}
+/* Vertical bridge from an expanded parent's chevron down to its children:
+   spans the rest of the row card, so rows of any height stay connected. */
+.sav-node > .sav-row.sav-row-branch-open::after, .sat-node > .sat-row.sat-row-branch-open::after {
+  content: ''; position: absolute; top: 24px; bottom: -1px; left: 18px;
+  border-left: 1px solid var(--dsw-alias-border-l2, rgba(15, 23, 42, 0.18));
+}
 /* ---- Subagents tab (conversation.view) ---- */
 .sat-root {
   display: flex; flex-direction: column; gap: 8px;
@@ -258,15 +315,15 @@ export function apply(ctx: ClientContext): void {
   background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.6));
   border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.07));
   border-radius: 8px;
-  padding: 6px 8px;
+  /* 11px left pad + 14px disclosure box puts the chevron center at x=18px,
+     the column the tree guide lines run through. */
+  padding: 7px 8px 7px 11px;
 }
 .sat-row-current {
-  border-left: 3px solid var(--dsw-alias-brand-primary, #2563eb);
+  /* Inset accent instead of a thicker border: keeps the content box (and the
+     chevron guide column) aligned with every other row. */
+  box-shadow: inset 3px 0 0 var(--dsw-alias-brand-primary, #2563eb);
   background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
-}
-.sat-row-guide {
-  position: absolute; top: 0; bottom: 0; left: -7px; width: 1px;
-  background: var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.10));
 }
 .sat-row-main { display: flex; align-items: center; gap: 6px; }
 .sat-label {
@@ -311,12 +368,12 @@ export function apply(ctx: ClientContext): void {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--dsw-alias-label-tertiary, #94a3b8);
   font-size: 11px; line-height: 16px;
-  margin-top: 2px; padding-left: 16px;
+  margin-top: 2px; padding-left: 22px;
 }
 .sat-details {
   display: grid; grid-template-columns: max-content 1fr;
   column-gap: 12px; row-gap: 2px;
-  margin: 6px 0 0; padding: 6px 8px 0;
+  margin: 6px 0 0; padding: 6px 8px 0 22px;
   border-top: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.06));
 }
 .sat-details dt, .sat-details dd {

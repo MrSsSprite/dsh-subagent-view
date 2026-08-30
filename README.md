@@ -20,10 +20,15 @@ panel, so nothing ever covers the conversation.
 - **Live statuses.** Each row shows a status dot and duration: running (animated blue),
   completed (green), error (red), interrupted/token-limit/refused (amber), and history-only
   rows (gray).
-- **Tree indent.** Rows are indented by their subagent depth, so parent/child runs stay readable.
+- **Canonical disclosure tree.** Rows with children get a chevron-right `>` on their left
+  that rotates downward when pressed to expand the branch, with gray `L`-shape guide lines
+  marking parent-child relationships — the same visual the built-in subagent catalog uses.
+  The sidebar panel starts with every branch collapsed; the conversation Subagents tab starts
+  fully expanded. Both keep their expansion state across the 1s polls.
 - **Open conversation.** A button on each row opens that subagent's conversation in the main view.
 - **Back to main session.** One click returns from a subagent conversation to the root session.
-- **Clear finished.** Hides terminal rows from the list and the bar counts until the next change.
+- **Clear finished.** Hides every fully-finished subtree (any branch that still contains a
+  running subagent stays visible) from the list and the bar counts until the next change.
 - **1-second polling.** The panel polls the host snapshot endpoint once per second while the
   sidebar exists.
 - **Refresh recovery.** All state is re-served by the host on the next poll, so a page refresh

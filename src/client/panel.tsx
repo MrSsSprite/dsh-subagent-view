@@ -7,13 +7,14 @@
  * everything without any model interaction.
  */
 import {
-  useEffect, useSyncExternalStore,
+  useEffect, useMemo, useSyncExternalStore,
   type ReactElement,
 } from 'react'
 import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import { SubagentTree, type TreeRowContext } from './tree'
 
 // ---- wire shape shared with the node half ----
 
@@ -46,10 +47,19 @@ interface MonitorState {
   rows: MonitorRow[]
   open: boolean
   hidden: string[]
+  /** Ids of branches whose children are shown; empty = every branch collapsed. */
+  expanded: ReadonlySet<string>
 }
 
 const listeners = new Set<() => void>()
-let state: MonitorState = { sessionId: undefined, now: Date.now(), rows: [], open: false, hidden: [] }
+let state: MonitorState = {
+  sessionId: undefined,
+  now: Date.now(),
+  rows: [],
+  open: false,
+  hidden: [],
+  expanded: new Set(),
+}
 let autoOpened = false
 let polling = false
 
@@ -238,12 +248,45 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
   }, [wide])
 
   // Rows arrive in tree pre-order (parent before child) from the host.
-  const visible = monitor.rows.filter(row => !monitor.hidden.includes(row.id))
+  // Subtree-aware visibility: `hidden` names whole pruned subtrees, and any
+  // row with a hidden ancestor stays hidden too, so the tree never orphans a
+  // visible child of a hidden parent.
+  const effectiveHidden = new Set<string>()
+  const visible: MonitorRow[] = []
+  const hiddenSet = new Set(monitor.hidden)
+  for (const row of monitor.rows) {
+    const hidden = hiddenSet.has(row.id)
+      || (row.parentId !== undefined && effectiveHidden.has(row.parentId))
+    if (hidden) effectiveHidden.add(row.id)
+    else visible.push(row)
+  }
   const running = visible.filter(row => row.status === 'running').length
   const done = visible.filter(row => row.status === 'completed').length
   const failed = visible.filter(row =>
     row.status === 'error' || row.status === 'aborted' || row.status === 'max-tokens' || row.status === 'refusal',
   ).length
+
+  // Branches are collapsed unless explicitly expanded: every subagent —
+  // including ones that appear later — starts collapsed, per the sidebar
+  // default.
+  const collapsed = useMemo(() => {
+    const parents = new Set<string>()
+    for (const row of visible) {
+      if (row.parentId !== undefined) parents.add(row.parentId)
+    }
+    const set = new Set<string>()
+    for (const id of parents) {
+      if (!monitor.expanded.has(id)) set.add(id)
+    }
+    return set
+  }, [visible, monitor.expanded])
+
+  const toggleBranch = (id: string): void => {
+    const next = new Set(monitor.expanded)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    commit({ expanded: next })
+  }
 
   const openChild = (row: MonitorRow): void => {
     if (sessionsSvc === undefined || monitor.sessionId === undefined || row.mode === undefined) return
@@ -253,6 +296,34 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
       mode: row.mode as 'one-shot' | 'continuable',
     }
     sessionsSvc.openSubagent(address)
+  }
+
+  /**
+   * Hide every fully-finished subtree (no running row anywhere below it).
+   * Whole branches are hidden — never single rows — so children always stay
+   * attached to a visible ancestor.
+   */
+  const clearFinished = (): void => {
+    const byParent = new Map<string, MonitorRow[]>()
+    for (const row of state.rows) {
+      if (row.parentId === undefined) continue
+      const siblings = byParent.get(row.parentId)
+      if (siblings === undefined) byParent.set(row.parentId, [row])
+      else siblings.push(row)
+    }
+    const keep = new Set<string>()
+    for (let index = state.rows.length - 1; index >= 0; index--) {
+      const row = state.rows[index]
+      if (row === undefined) continue
+      const kept = row.status === 'running'
+        || (byParent.get(row.id) ?? []).some(child => keep.has(child.id))
+      if (kept) keep.add(row.id)
+    }
+    const hidden = new Set(state.hidden)
+    for (const row of state.rows) {
+      if (!keep.has(row.id)) hidden.add(row.id)
+    }
+    commit({ hidden: [...hidden] })
   }
 
   // Rail mode: a compact icon button with a running-count badge. Clicking it
@@ -333,39 +404,44 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
                 )
               : (
                 <div className="sav-rows">
-                  {visible.map(row => {
-                    const meta = STATUS[row.status] ?? UNKNOWN
-                    const elapsed = row.status === 'running'
-                      ? fmtDuration(row.startedAt, state.now)
-                      : fmtDuration(row.startedAt, row.endedAt)
-                    const depth = typeof row.depth === 'number' ? row.depth : 1
-                    const indent = Math.max(0, depth - 1) * 14
-                    const modeText = row.mode === 'continuable' ? 'continuable' : row.mode === 'one-shot' ? 'one-shot' : ''
-                    const metaLine = [row.provider, modeText, shortId(row.id)]
-                      .filter(value => typeof value === 'string' && value !== '')
-                      .join(' · ')
-                    return (
-                      <div key={row.id} className="sav-row" style={{ marginLeft: indent }}>
-                        <div className="sav-row-main">
-                          <StatusDot status={row.status} />
-                          <span className="sav-row-label" title={rowLabel(row)}>{rowLabel(row)}</span>
-                          {row.mode !== undefined && sessionsSvc !== undefined
-                            ? (
-                              <button className="sav-btn sav-row-open" type="button" onClick={() => openChild(row)}>
-                                Open
-                              </button>
-                              )
-                            : null}
+                  <SubagentTree
+                    rows={visible}
+                    collapsed={collapsed}
+                    onToggle={toggleBranch}
+                    cls="sav"
+                    renderRow={(row, ctx: TreeRowContext) => {
+                      const meta = STATUS[row.status] ?? UNKNOWN
+                      const elapsed = row.status === 'running'
+                        ? fmtDuration(row.startedAt, state.now)
+                        : fmtDuration(row.startedAt, row.endedAt)
+                      const modeText = row.mode === 'continuable' ? 'continuable' : row.mode === 'one-shot' ? 'one-shot' : ''
+                      const metaLine = [row.provider, modeText, shortId(row.id)]
+                        .filter(value => typeof value === 'string' && value !== '')
+                        .join(' · ')
+                      return (
+                        <div className={`sav-row${ctx.expanded && ctx.hasChildren ? ' sav-row-branch-open' : ''}`}>
+                          <div className="sav-row-main">
+                            {ctx.disclosure}
+                            <StatusDot status={row.status} />
+                            <span className="sav-row-label" title={rowLabel(row)}>{rowLabel(row)}</span>
+                            {row.mode !== undefined && sessionsSvc !== undefined
+                              ? (
+                                <button className="sav-btn sav-row-open" type="button" onClick={() => openChild(row)}>
+                                  Open
+                                </button>
+                                )
+                              : null}
+                          </div>
+                          <div className="sav-row-foot">
+                            <span className="sav-row-meta">{metaLine !== '' ? metaLine : '\u00A0'}</span>
+                            <span className="sav-row-time">
+                              {row.status === 'running' ? `${elapsed} · ${meta.label}` : `${meta.label} · ${elapsed}`}
+                            </span>
+                          </div>
                         </div>
-                        <div className="sav-row-foot">
-                          <span className="sav-row-meta">{metaLine !== '' ? metaLine : '\u00A0'}</span>
-                          <span className="sav-row-time">
-                            {row.status === 'running' ? `${elapsed} · ${meta.label}` : `${meta.label} · ${elapsed}`}
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    }}
+                  />
                 </div>
                 )}
             <div className="sav-panel-footer">
@@ -378,17 +454,7 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
                   </button>
                   )
                 : null}
-              <button
-                className="sav-btn"
-                type="button"
-                onClick={() => {
-                  const hidden = [...state.hidden]
-                  for (const row of state.rows) {
-                    if (row.status !== 'running' && !hidden.includes(row.id)) hidden.push(row.id)
-                  }
-                  commit({ hidden })
-                }}
-              >
+              <button className="sav-btn" type="button" onClick={clearFinished}>
                 Clear finished
               </button>
             </div>
