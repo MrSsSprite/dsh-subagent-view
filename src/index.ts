@@ -14,7 +14,7 @@
  * members.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SubagentRunEndInfo, SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 // Loads the Context augmentations that provide `ctx.sessions`,
@@ -317,6 +317,14 @@ export function apply(ctx: Context): void {
     return undefined
   }
 
+  /** Minimal faces of the optional cold-read services (read defensively). */
+  interface ProjectionCacheFace {
+    cachedSnapshot(meta: SessionHeader): { values: Record<string, unknown> } | undefined
+  }
+  interface PersistenceListFace {
+    list(): Promise<SessionHeader[]>
+  }
+
   /** Token + active-timing projections read for one row. */
   interface ProjectionsFor {
     tokens?: number
@@ -326,26 +334,31 @@ export function apply(ctx: Context): void {
   }
 
   /**
-   * Read a live child session's durable `tokenUsage` and `subagentTiming`
+   * Read a child session's durable `tokenUsage` and `subagentTiming`
    * projections — the same authoritative figures the built-in subagent catalog
-   * shows. Tokens sum the four disjoint usage buckets; timing carries the
-   * settled active-turn milliseconds plus an optional in-flight active window.
-   * Returns an empty object when the session is not live or the projections
-   * are not registered.
+   * shows, live or cold. Live children cut the registry's live watermark
+   * cache; cold (persisted-only) children view the projection cache's stored
+   * rows (zero log load). Tokens sum the four disjoint usage buckets; timing
+   * carries settled active-turn ms plus an optional in-flight active window.
    */
-  const projectionsFor = (id: string): ProjectionsFor => {
-    const session = ctx.sessions.get(id as SessionId)
-    if (session === undefined) return {}
-    const values = ctx.sessionProjections.snapshot(session).values as unknown as {
-      tokenUsage?: { uncachedInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
-      subagentTiming?: { settledMs: number; active?: { since: number; through: number } }
+  const projectionsFor = (id: string, coldHeaders: Map<string, SessionHeader>): ProjectionsFor => {
+    let values: Record<string, unknown> | undefined
+    const live = ctx.sessions.get(id as SessionId)
+    if (live !== undefined) {
+      values = ctx.sessionProjections.snapshot(live).values as unknown as Record<string, unknown>
+    } else {
+      const header = coldHeaders.get(id)
+      const cache = ctx.get('sessionProjectionCache') as ProjectionCacheFace | undefined
+      if (header !== undefined && cache !== undefined) {
+        values = cache.cachedSnapshot(header)?.values
+      }
     }
     const out: ProjectionsFor = {}
-    const usage = values.tokenUsage
+    const usage = values?.tokenUsage as { uncachedInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | undefined
     if (usage !== undefined) {
       out.tokens = usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
     }
-    const timing = values.subagentTiming
+    const timing = values?.subagentTiming as { settledMs: number; active?: { since: number; through: number } } | undefined
     if (timing !== undefined) {
       out.settledMs = timing.settledMs
       if (timing.active !== undefined) {
@@ -420,6 +433,21 @@ export function apply(ctx: Context): void {
       ancestors.push(...chain)
     }
 
+    // Headers for cold (persisted-only) children, so their projection-cache
+    // rows can be read with zero log load. Fail-soft: without a persistence
+    // seam, cold rows render without token/timing metrics.
+    const coldHeaders = new Map<string, SessionHeader>()
+    try {
+      const persistence = ctx.get('sessionPersistence') as PersistenceListFace | undefined
+      if (persistence !== undefined) {
+        for (const header of await persistence.list()) {
+          coldHeaders.set(asString(header.id), header)
+        }
+      }
+    } catch {
+      // cold rows degrade to no token/timing metrics
+    }
+
     // Merge the catalog with observed event rows, mirroring `enrich` but
     // carrying the tab-specific fields (activity/hasChildren/reason/purpose
     // and the current marker).
@@ -438,7 +466,7 @@ export function apply(ctx: Context): void {
         hasChildren: entry.kind === 'child' ? entry.hasChildren : false,
       }
       const purpose = purposeFor(id)
-      const projections = projectionsFor(id)
+      const projections = projectionsFor(id, coldHeaders)
       const observed = eventRows.find(row => row.id === id)
       if (observed !== undefined) {
         const row: TabRow = {
@@ -488,7 +516,7 @@ export function apply(ctx: Context): void {
     for (const observed of eventRows) {
       if (seen.has(observed.id)) continue
       const purpose = purposeFor(observed.id)
-      const projections = projectionsFor(observed.id)
+      const projections = projectionsFor(observed.id, coldHeaders)
       const row: TabRow = {
         id: observed.id,
         depth: 0,
