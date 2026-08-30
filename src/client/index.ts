@@ -235,6 +235,55 @@ export function apply(ctx: ClientContext): void {
   content: ''; position: absolute; top: 24px; bottom: -1px; left: 18px;
   border-left: 1px solid var(--dsw-alias-border-l2, rgba(15, 23, 42, 0.18));
 }
+/* ---- Archived folder (shared by the sidebar panel "sav" and the Subagents
+   tab "sat") ---- a disclosure-style header whose chevron sits on the same
+   x=18px column as row chevrons, with the folder body indented like a
+   children block and a guide-line bridge from the open header down to it. */
+.sav-folder, .sat-folder {
+  flex: none; display: flex; flex-direction: column;
+}
+.sav-folder-header, .sat-folder-header {
+  position: relative;
+  display: flex; align-items: center; gap: 6px;
+  width: 100%;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.07));
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.6));
+  /* 11px left pad + 14px chevron box puts the chevron center at x=18px. */
+  padding: 7px 8px 7px 11px;
+  font-family: inherit; font-size: 12px; line-height: 18px;
+  color: var(--dsw-alias-label-primary, inherit);
+  cursor: pointer; text-align: left;
+}
+.sav-folder-header:hover, .sat-folder-header:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
+}
+.sav-folder-chevron, .sat-folder-chevron {
+  flex: none; width: 14px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  transition: transform 120ms var(--ds-ease-in-out, ease-in-out);
+}
+.sav-folder-chevron-open, .sat-folder-chevron-open { transform: rotate(90deg); }
+.sav-folder-icon, .sat-folder-icon {
+  flex: none; width: 14px; height: 14px;
+  color: var(--dsw-alias-label-secondary, #64748b);
+}
+.sav-folder-label, .sat-folder-label { flex: none; font-weight: 600; }
+.sav-folder-count, .sat-folder-count {
+  flex: none; min-width: 16px; text-align: center;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-variant-numeric: tabular-nums; font-size: 11px; line-height: 16px;
+}
+.sav-folder-body, .sat-folder-body {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-left: 18px; padding-left: 4px;
+}
+/* Guide-line bridge from the open folder header's chevron down to the body. */
+.sav-folder-open::after, .sat-folder-open::after {
+  content: ''; position: absolute; top: 24px; bottom: -1px; left: 18px;
+  border-left: 1px solid var(--dsw-alias-border-l2, rgba(15, 23, 42, 0.18));
+}
 /* ---- Subagents tab (conversation.view) ---- */
 .sat-root {
   display: flex; flex-direction: column; gap: 8px;

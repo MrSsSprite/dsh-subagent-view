@@ -19,7 +19,7 @@ import {
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client' // adds 'conversation.view' to SlotMap
 import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
-import { SubagentTree, type TreeRowContext } from './tree'
+import { ArchivedFolder, splitArchived, SubagentTree, type TreeRowContext } from './tree'
 
 // ---- wire shape shared with the node half ----
 
@@ -321,6 +321,11 @@ export function SubagentsView(props: TabProps): ReactElement {
   // The row id of the single floating details window, or null when closed.
   const [detailsOpen, setDetailsOpen] = useState<string | null>(null)
 
+  // Archived folder body; collapsed by default. Branches inside it keep the
+  // tab's expanded-by-default branch behavior. Resets on mount, like the
+  // other page-local state.
+  const [archiveOpen, setArchiveOpen] = useState(false)
+
   // Close the floating window on any pointer-down outside it. The toggle
   // button is exempt (its click handler opens/closes), and so is the window
   // itself, so interacting with either never dismisses it mid-click.
@@ -358,6 +363,52 @@ export function SubagentsView(props: TabProps): ReactElement {
     const active = activeMsFor(row, now)
     return sum + (active ?? 0)
   }, 0)
+
+  // Completed one-shot subagents move into the Archived folder; the rest of
+  // the forest stays in the main list. Summary counts keep covering all rows.
+  const { main, archived, count } = splitArchived(rows)
+
+  const renderTabRow = (row: TabRow, ctx: TreeRowContext): ReactElement => {
+    const label = rowLabel(row)
+    const activeMs = activeMsFor(row, now)
+    return (
+      <div
+        className={`sat-row${row.isCurrent ? ' sat-row-current' : ''}${ctx.expanded && ctx.hasChildren ? ' sat-row-branch-open' : ''}`}
+      >
+        <div className="sat-row-main">
+          {ctx.disclosure}
+          <StatusDot status={row.status} />
+          <ModeChip mode={row.mode} />
+          <span className="sat-label" title={label}>{label}</span>
+          {typeof row.provider === 'string' && row.provider !== ''
+            ? <span className="sat-provider-chip">{providerChipText(row.provider)}</span>
+            : null}
+          <span className="sat-metrics">
+            {row.tokens !== undefined
+              ? <span className="sat-metric-token">{fmtTokens(row.tokens)} tok</span>
+              : null}
+            {activeMs !== undefined
+              ? <span className="sat-metric-duration">{fmtDuration(0, activeMs)}</span>
+              : null}
+          </span>
+          <span className="sat-row-actions">
+            <button
+              className="sat-row-btn"
+              type="button"
+              title="Details"
+              onClick={() => setDetailsOpen(prev => (prev === row.id ? null : row.id))}
+            >
+              ⓘ
+            </button>
+          </span>
+        </div>
+        {typeof row.purpose === 'string' && row.purpose !== ''
+          ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
+          : null}
+        {detailsOpen === row.id ? <DetailsPopover row={row} /> : null}
+      </div>
+    )
+  }
 
   return (
     <div className="sat-root">
@@ -422,51 +473,21 @@ export function SubagentsView(props: TabProps): ReactElement {
         : (
           <div className="sat-tree">
             <SubagentTree
-              rows={rows}
+              rows={main}
               collapsed={collapsed}
               onToggle={toggleBranch}
               cls="sat"
-              renderRow={(row, ctx: TreeRowContext) => {
-                const label = rowLabel(row)
-                const activeMs = activeMsFor(row, now)
-                return (
-                  <div
-                    className={`sat-row${row.isCurrent ? ' sat-row-current' : ''}${ctx.expanded && ctx.hasChildren ? ' sat-row-branch-open' : ''}`}
-                  >
-                    <div className="sat-row-main">
-                      {ctx.disclosure}
-                      <StatusDot status={row.status} />
-                      <ModeChip mode={row.mode} />
-                      <span className="sat-label" title={label}>{label}</span>
-                      {typeof row.provider === 'string' && row.provider !== ''
-                        ? <span className="sat-provider-chip">{providerChipText(row.provider)}</span>
-                        : null}
-                      <span className="sat-metrics">
-                        {row.tokens !== undefined
-                          ? <span className="sat-metric-token">{fmtTokens(row.tokens)} tok</span>
-                          : null}
-                        {activeMs !== undefined
-                          ? <span className="sat-metric-duration">{fmtDuration(0, activeMs)}</span>
-                          : null}
-                      </span>
-                      <span className="sat-row-actions">
-                        <button
-                          className="sat-row-btn"
-                          type="button"
-                          title="Details"
-                          onClick={() => setDetailsOpen(prev => (prev === row.id ? null : row.id))}
-                        >
-                          ⓘ
-                        </button>
-                      </span>
-                    </div>
-                    {typeof row.purpose === 'string' && row.purpose !== ''
-                      ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
-                      : null}
-                    {detailsOpen === row.id ? <DetailsPopover row={row} /> : null}
-                  </div>
-                )
-              }}
+              renderRow={renderTabRow}
+            />
+            <ArchivedFolder
+              rows={archived}
+              count={count}
+              cls="sat"
+              collapsed={collapsed}
+              onToggle={toggleBranch}
+              renderRow={renderTabRow}
+              open={archiveOpen}
+              onToggleFolder={() => setArchiveOpen(prev => !prev)}
             />
           </div>
           )}

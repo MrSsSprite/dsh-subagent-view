@@ -20,6 +20,11 @@ panel, so nothing ever covers the conversation.
 - **Live statuses.** Each row shows a status dot and duration: running (animated blue),
   completed (green), error (red), interrupted/token-limit/refused (amber), and history-only
   rows (gray).
+- **Archived folder.** Completed one-shot subagents are grouped into a collapsible
+  **Archived** folder at the bottom of the list (collapsed by default in both the sidebar
+  panel and the Subagents tab). Their status, dot color, and Done count are unchanged —
+  only their placement changes; each archived subagent's subtree moves with it so the tree
+  never orphans a child.
 - **Canonical disclosure tree.** Rows with children get a chevron-right `>` on their left
   that rotates downward when pressed to expand the branch, with gray `L`-shape guide lines
   marking parent-child relationships — the same visual the built-in subagent catalog uses.
@@ -123,6 +128,9 @@ curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:3080/api/subagent-mon
 
 Bar counts only include rows currently visible in the panel (rows hidden via *Clear finished*
 are excluded).
+
+Completed one-shot subagents keep the green `completed` dot and Done count, but they are
+listed inside the **Archived** folder at the bottom of the list rather than in the main tree.
 
 ## Development
 

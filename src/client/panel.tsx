@@ -14,7 +14,7 @@ import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import { SubagentTree, type TreeRowContext } from './tree'
+import { ArchivedFolder, splitArchived, SubagentTree, type TreeRowContext } from './tree'
 
 // ---- wire shape shared with the node half ----
 
@@ -49,6 +49,8 @@ interface MonitorState {
   hidden: string[]
   /** Ids of branches whose children are shown; empty = every branch collapsed. */
   expanded: ReadonlySet<string>
+  /** Whether the Archived folder body is shown; collapsed by default. */
+  archiveOpen: boolean
 }
 
 const listeners = new Set<() => void>()
@@ -59,6 +61,7 @@ let state: MonitorState = {
   open: false,
   hidden: [],
   expanded: new Set(),
+  archiveOpen: false,
 }
 let autoOpened = false
 let polling = false
@@ -326,6 +329,43 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
     commit({ hidden: [...hidden] })
   }
 
+  // Completed one-shot subagents move into the Archived folder; the rest of
+  // the visible forest stays in the main list.
+  const { main, archived, count } = splitArchived(visible)
+
+  const renderMonitorRow = (row: MonitorRow, ctx: TreeRowContext): ReactElement => {
+    const meta = STATUS[row.status] ?? UNKNOWN
+    const elapsed = row.status === 'running'
+      ? fmtDuration(row.startedAt, state.now)
+      : fmtDuration(row.startedAt, row.endedAt)
+    const modeText = row.mode === 'continuable' ? 'continuable' : row.mode === 'one-shot' ? 'one-shot' : ''
+    const metaLine = [row.provider, modeText, shortId(row.id)]
+      .filter(value => typeof value === 'string' && value !== '')
+      .join(' · ')
+    return (
+      <div className={`sav-row${ctx.expanded && ctx.hasChildren ? ' sav-row-branch-open' : ''}`}>
+        <div className="sav-row-main">
+          {ctx.disclosure}
+          <StatusDot status={row.status} />
+          <span className="sav-row-label" title={rowLabel(row)}>{rowLabel(row)}</span>
+          {row.mode !== undefined && sessionsSvc !== undefined
+            ? (
+              <button className="sav-btn sav-row-open" type="button" onClick={() => openChild(row)}>
+                Open
+              </button>
+              )
+            : null}
+        </div>
+        <div className="sav-row-foot">
+          <span className="sav-row-meta">{metaLine !== '' ? metaLine : '\u00A0'}</span>
+          <span className="sav-row-time">
+            {row.status === 'running' ? `${elapsed} · ${meta.label}` : `${meta.label} · ${elapsed}`}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   // Rail mode: a compact icon button with a running-count badge. Clicking it
   // expands the sidebar column first, then opens the panel.
   if (!wide) {
@@ -405,42 +445,21 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
               : (
                 <div className="sav-rows">
                   <SubagentTree
-                    rows={visible}
+                    rows={main}
                     collapsed={collapsed}
                     onToggle={toggleBranch}
                     cls="sav"
-                    renderRow={(row, ctx: TreeRowContext) => {
-                      const meta = STATUS[row.status] ?? UNKNOWN
-                      const elapsed = row.status === 'running'
-                        ? fmtDuration(row.startedAt, state.now)
-                        : fmtDuration(row.startedAt, row.endedAt)
-                      const modeText = row.mode === 'continuable' ? 'continuable' : row.mode === 'one-shot' ? 'one-shot' : ''
-                      const metaLine = [row.provider, modeText, shortId(row.id)]
-                        .filter(value => typeof value === 'string' && value !== '')
-                        .join(' · ')
-                      return (
-                        <div className={`sav-row${ctx.expanded && ctx.hasChildren ? ' sav-row-branch-open' : ''}`}>
-                          <div className="sav-row-main">
-                            {ctx.disclosure}
-                            <StatusDot status={row.status} />
-                            <span className="sav-row-label" title={rowLabel(row)}>{rowLabel(row)}</span>
-                            {row.mode !== undefined && sessionsSvc !== undefined
-                              ? (
-                                <button className="sav-btn sav-row-open" type="button" onClick={() => openChild(row)}>
-                                  Open
-                                </button>
-                                )
-                              : null}
-                          </div>
-                          <div className="sav-row-foot">
-                            <span className="sav-row-meta">{metaLine !== '' ? metaLine : '\u00A0'}</span>
-                            <span className="sav-row-time">
-                              {row.status === 'running' ? `${elapsed} · ${meta.label}` : `${meta.label} · ${elapsed}`}
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    }}
+                    renderRow={renderMonitorRow}
+                  />
+                  <ArchivedFolder
+                    rows={archived}
+                    count={count}
+                    cls="sav"
+                    collapsed={collapsed}
+                    onToggle={toggleBranch}
+                    renderRow={renderMonitorRow}
+                    open={monitor.archiveOpen}
+                    onToggleFolder={() => commit({ archiveOpen: !monitor.archiveOpen })}
                   />
                 </div>
                 )}

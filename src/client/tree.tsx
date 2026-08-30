@@ -26,7 +26,11 @@
  *   connected.
  */
 import { useMemo, type ReactElement } from 'react'
-import { IconChevronRightOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconChevronRightOutline14,
+  IconFolderClose16,
+  IconFolderOpen16,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** Minimal wire shape every tree row must satisfy. */
 export interface TreeRowLike {
@@ -136,5 +140,120 @@ export function SubagentTree<Row extends TreeRowLike>(props: SubagentTreeProps<R
         row.id,
       ))}
     </>
+  )
+}
+
+// ---- Archived folder ----
+
+/** Rows that can carry the archived grouping facts. */
+export interface ArchivableRow extends TreeRowLike {
+  mode?: string
+  status: string
+}
+
+/** Result of splitting one forest into the main list and the Archived folder. */
+export interface ArchivedSplit<Row extends ArchivableRow> {
+  /** Rows that stay in the main forest, in original order. */
+  main: Row[]
+  /** Archive members plus every row nested under them, in original order. */
+  archived: Row[]
+  /** Number of archive members (member descendants excluded). */
+  count: number
+}
+
+/**
+ * Partition `rows` into the main forest and the Archived folder. A member is
+ * a completed one-shot row; the folder takes each member's whole subtree, so
+ * the tree never orphans a child of a moved row. Nested members stay nested:
+ * only the outermost archived ancestor becomes a folder root.
+ */
+export function splitArchived<Row extends ArchivableRow>(rows: readonly Row[]): ArchivedSplit<Row> {
+  const isMember = (row: Row): boolean => row.mode === 'one-shot' && row.status === 'completed'
+  const memberIds = new Set<string>()
+  for (const row of rows) {
+    if (isMember(row)) memberIds.add(row.id)
+  }
+  const archiveRoots = new Set<string>()
+  for (const row of rows) {
+    if (!memberIds.has(row.id)) continue
+    if (row.parentId === undefined || !memberIds.has(row.parentId)) archiveRoots.add(row.id)
+  }
+  const byId = new Map<string, Row>()
+  for (const row of rows) byId.set(row.id, row)
+  const inFolder = (row: Row, seen: Set<string>): boolean => {
+    if (archiveRoots.has(row.id)) return true
+    if (row.parentId === undefined || seen.has(row.id)) return false
+    seen.add(row.id)
+    const parent = byId.get(row.parentId)
+    return parent !== undefined && inFolder(parent, seen)
+  }
+  const moved = new Set<string>()
+  let count = 0
+  for (const row of rows) {
+    if (!inFolder(row, new Set())) continue
+    moved.add(row.id)
+    if (isMember(row)) count += 1
+  }
+  const archived = rows.filter(row => moved.has(row.id))
+  const main = rows.filter(row => !moved.has(row.id))
+  return { main, archived, count }
+}
+
+export interface ArchivedFolderProps<Row extends ArchivableRow> {
+  /** The archive portion of the split (members + their subtrees). */
+  rows: readonly Row[]
+  /** Number of archive members; rendered in the header. */
+  count: number
+  /** CSS class prefix shared with the row cards. */
+  cls: string
+  /** Branch collapse ids; forwarded to the inner tree. */
+  collapsed: ReadonlySet<string>
+  onToggle(id: string): void
+  renderRow(row: Row, ctx: TreeRowContext): ReactElement
+  /** Whether the folder body is currently rendered. */
+  open: boolean
+  onToggleFolder(): void
+}
+
+/**
+ * The "Archived" container: a disclosure-style header (chevron + folder icon +
+ * member count) whose body renders the archive forest with the same tree
+ * visuals as the main list. Renders nothing while empty.
+ */
+export function ArchivedFolder<Row extends ArchivableRow>(props: ArchivedFolderProps<Row>): ReactElement | null {
+  const { rows, count, cls, collapsed, onToggle, renderRow, open, onToggleFolder } = props
+  if (rows.length === 0) return null
+  return (
+    <div className={`${cls}-folder`}>
+      <button
+        className={`${cls}-folder-header${open ? ` ${cls}-folder-open` : ''}`}
+        type="button"
+        aria-expanded={open}
+        title={open ? 'Collapse archived' : 'Expand archived'}
+        onClick={onToggleFolder}
+      >
+        <span className={`${cls}-folder-chevron${open ? ` ${cls}-folder-chevron-open` : ''}`} aria-hidden="true">
+          <IconChevronRightOutline14 />
+        </span>
+        {open
+          ? <IconFolderOpen16 size={14} className={`${cls}-folder-icon`} />
+          : <IconFolderClose16 size={14} className={`${cls}-folder-icon`} />}
+        <span className={`${cls}-folder-label`}>Archived</span>
+        <span className={`${cls}-folder-count`}>{count}</span>
+      </button>
+      {open
+        ? (
+          <div className={`${cls}-folder-body`}>
+            <SubagentTree
+              rows={rows}
+              collapsed={collapsed}
+              onToggle={onToggle}
+              cls={cls}
+              renderRow={renderRow}
+            />
+          </div>
+          )
+        : null}
+    </div>
   )
 }
