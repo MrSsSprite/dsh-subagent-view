@@ -21,6 +21,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 // `ctx.subagents` and `ctx.webServer`; the package is not imported at
 // runtime.
 import type {} from '@deepseek-ai/dsh-host-webserver'
+// Loads the Context augmentation that provides `ctx.sessionProjections`.
+import type {} from '@deepseek-ai/dsh-session-projection'
 
 /**
  * One observed run, held in memory between its start and end events.
@@ -109,6 +111,14 @@ interface TabRow {
   activity?: string
   reason?: string
   purpose?: string
+  /** Total provider-reported tokens (four disjoint buckets). */
+  tokens?: number
+  /** Settled active-turn milliseconds. */
+  settledMs?: number
+  /** Open turn start (epoch ms), when one is in flight. */
+  activeSince?: number
+  /** Open turn latest folded event time (epoch ms). */
+  activeThrough?: number
 }
 
 /** Payload of `GET /api/subagent-view/tab`. */
@@ -125,7 +135,7 @@ const MAX_ROWS_PER_ROOT = 200
 /** Parent-chain hop budget when resolving a child to its root session. */
 const MAX_ROOT_HOPS = 32
 
-export const inject = ['sessions', 'subagents', 'webServer']
+export const inject = ['sessions', 'subagents', 'webServer', 'sessionProjections']
 
 export function apply(ctx: Context): void {
   /** Observed runs, keyed by run id. */
@@ -307,6 +317,45 @@ export function apply(ctx: Context): void {
     return undefined
   }
 
+  /** Token + active-timing projections read for one row. */
+  interface ProjectionsFor {
+    tokens?: number
+    settledMs?: number
+    activeSince?: number
+    activeThrough?: number
+  }
+
+  /**
+   * Read a live child session's durable `tokenUsage` and `subagentTiming`
+   * projections — the same authoritative figures the built-in subagent catalog
+   * shows. Tokens sum the four disjoint usage buckets; timing carries the
+   * settled active-turn milliseconds plus an optional in-flight active window.
+   * Returns an empty object when the session is not live or the projections
+   * are not registered.
+   */
+  const projectionsFor = (id: string): ProjectionsFor => {
+    const session = ctx.sessions.get(id as SessionId)
+    if (session === undefined) return {}
+    const values = ctx.sessionProjections.snapshot(session).values as unknown as {
+      tokenUsage?: { uncachedInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+      subagentTiming?: { settledMs: number; active?: { since: number; through: number } }
+    }
+    const out: ProjectionsFor = {}
+    const usage = values.tokenUsage
+    if (usage !== undefined) {
+      out.tokens = usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+    }
+    const timing = values.subagentTiming
+    if (timing !== undefined) {
+      out.settledMs = timing.settledMs
+      if (timing.active !== undefined) {
+        out.activeSince = timing.active.since
+        out.activeThrough = timing.active.through
+      }
+    }
+    return out
+  }
+
   /**
    * Build the root-anchored tab payload: the descendant catalog (rooted at the
    * session's resolved root) merged with the observed event rows, each row
@@ -389,6 +438,7 @@ export function apply(ctx: Context): void {
         hasChildren: entry.kind === 'child' ? entry.hasChildren : false,
       }
       const purpose = purposeFor(id)
+      const projections = projectionsFor(id)
       const observed = eventRows.find(row => row.id === id)
       if (observed !== undefined) {
         const row: TabRow = {
@@ -408,6 +458,10 @@ export function apply(ctx: Context): void {
         }
         if (observed.endedAt !== undefined) row.endedAt = observed.endedAt
         if (purpose !== undefined) row.purpose = purpose
+        if (projections.tokens !== undefined) row.tokens = projections.tokens
+        if (projections.settledMs !== undefined) row.settledMs = projections.settledMs
+        if (projections.activeSince !== undefined) row.activeSince = projections.activeSince
+        if (projections.activeThrough !== undefined) row.activeThrough = projections.activeThrough
         merged.push(row)
       } else {
         const row: TabRow = {
@@ -424,12 +478,17 @@ export function apply(ctx: Context): void {
           row.reason = entry.reason
         }
         if (purpose !== undefined) row.purpose = purpose
+        if (projections.tokens !== undefined) row.tokens = projections.tokens
+        if (projections.settledMs !== undefined) row.settledMs = projections.settledMs
+        if (projections.activeSince !== undefined) row.activeSince = projections.activeSince
+        if (projections.activeThrough !== undefined) row.activeThrough = projections.activeThrough
         merged.push(row)
       }
     }
     for (const observed of eventRows) {
       if (seen.has(observed.id)) continue
       const purpose = purposeFor(observed.id)
+      const projections = projectionsFor(observed.id)
       const row: TabRow = {
         id: observed.id,
         depth: 0,
@@ -443,6 +502,10 @@ export function apply(ctx: Context): void {
       }
       if (observed.endedAt !== undefined) row.endedAt = observed.endedAt
       if (purpose !== undefined) row.purpose = purpose
+      if (projections.tokens !== undefined) row.tokens = projections.tokens
+      if (projections.settledMs !== undefined) row.settledMs = projections.settledMs
+      if (projections.activeSince !== undefined) row.activeSince = projections.activeSince
+      if (projections.activeThrough !== undefined) row.activeThrough = projections.activeThrough
       merged.push(row)
     }
     // No re-sort: catalog pre-order is the tree order; event-only rows

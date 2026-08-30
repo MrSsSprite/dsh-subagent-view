@@ -233,6 +233,18 @@ export function apply(ctx: ClientContext): void {
   flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
   font-variant-numeric: tabular-nums; font-size: 11px; line-height: 16px;
 }
+.sat-sum-totals {
+  color: var(--dsw-alias-label-secondary, #64748b);
+  font-variant-numeric: tabular-nums; font-size: 11px; line-height: 16px;
+}
+.sat-metrics {
+  flex: none; display: flex; flex-direction: column; align-items: flex-end;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-variant-numeric: tabular-nums; font-size: 11px; line-height: 16px;
+  white-space: nowrap;
+}
+.sat-metric-token { color: var(--dsw-alias-label-secondary, #64748b); }
+.sat-metric-duration { color: var(--dsw-alias-label-tertiary, #94a3b8); }
 .sat-tree {
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 6px;

@@ -44,6 +44,10 @@ interface TabRow {
   activity?: string
   reason?: string
   purpose?: string
+  tokens?: number
+  settledMs?: number
+  activeSince?: number
+  activeThrough?: number
 }
 
 interface TabPayload {
@@ -157,6 +161,19 @@ function fmtDuration(start: number | undefined, end: number | undefined): string
   const sec = s % 60
   const pad = (n: number): string => String(n).padStart(2, '0')
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
+function activeMsFor(row: TabRow, now: number): number | undefined {
+  if (row.settledMs === undefined) return undefined
+  if (row.activeSince === undefined) return row.settledMs
+  const end = row.status === 'running' ? now : (row.activeThrough ?? now)
+  return row.settledMs + Math.max(0, end - row.activeSince)
 }
 
 const shortId = (id: string | undefined): string =>
@@ -308,6 +325,11 @@ export function SubagentsView(props: TabProps): ReactElement {
   ).length
   const total = rows.length
   const pct = (count: number): number => total === 0 ? 0 : Math.round((count / total) * 100)
+  const totalTokens = rows.reduce((sum, row) => sum + (row.tokens ?? 0), 0)
+  const totalActiveMs = rows.reduce((sum, row) => {
+    const active = activeMsFor(row, now)
+    return sum + (active ?? 0)
+  }, 0)
 
   return (
     <div className="sat-root">
@@ -360,6 +382,9 @@ export function SubagentsView(props: TabProps): ReactElement {
           </div>
           <span className="sat-sum-total">total {total}</span>
         </div>
+        <div className="sat-sum-totals">
+          {fmtTokens(totalTokens)} tokens · {fmtDuration(0, totalActiveMs)} active time
+        </div>
       </div>
 
       {rows.length === 0
@@ -372,9 +397,7 @@ export function SubagentsView(props: TabProps): ReactElement {
               const depth = typeof row.depth === 'number' ? row.depth : 0
               const indent = Math.max(0, depth) * 14
               const label = rowLabel(row)
-              const elapsed = row.status === 'running'
-                ? fmtDuration(row.startedAt, now)
-                : fmtDuration(row.startedAt, row.endedAt)
+              const activeMs = activeMsFor(row, now)
               return (
                 <div
                   key={row.id}
@@ -389,7 +412,14 @@ export function SubagentsView(props: TabProps): ReactElement {
                     {typeof row.provider === 'string' && row.provider !== ''
                       ? <span className="sat-provider-chip">{providerChipText(row.provider)}</span>
                       : null}
-                    <span className="sat-duration">{elapsed}</span>
+                    <span className="sat-metrics">
+                      {row.tokens !== undefined
+                        ? <span className="sat-metric-token">{fmtTokens(row.tokens)} tok</span>
+                        : null}
+                      {activeMs !== undefined
+                        ? <span className="sat-metric-duration">{fmtDuration(0, activeMs)}</span>
+                        : null}
+                    </span>
                     <span className="sat-row-actions">
                       <button
                         className="sat-row-btn"
