@@ -72,7 +72,7 @@ interface PanelRow {
   startedAt?: number
   endedAt?: number
   status: string
-  /** Newest-first key for catalog rows that were never observed running. */
+  /** Recency hint for catalog rows never observed running (informational only; rows are ordered by tree position). */
   sortKey?: number
 }
 
@@ -102,7 +102,7 @@ interface TabRow {
   startedAt?: number
   endedAt?: number
   status: string
-  /** Newest-first key for catalog rows that were never observed running. */
+  /** Recency hint for catalog rows never observed running (informational only; rows are ordered by tree position). */
   sortKey?: number
   isCurrent: boolean
   hasChildren: boolean
@@ -210,8 +210,9 @@ export function apply(ctx: Context): void {
    * parentId; observed runs override with their event data; catalog
    * entries without an observed run get a recency sort key and a
    * `running`/`unknown` status; event rows the catalog does not mention
-   * are kept with depth 0. The result sorts newest-first: observed runs
-   * by start time, catalog-only rows by their recency key.
+   * are kept with depth 0. Rows keep the catalog's stable pre-order
+   * (parents before their children), so the client renders the tree
+   * top-down; event-only stragglers trail the list.
    */
   const enrich = async (sessionId: string): Promise<PanelRow[]> => {
     let catalog: Awaited<ReturnType<typeof ctx.subagents.listDescendants>> = []
@@ -229,8 +230,8 @@ export function apply(ctx: Context): void {
 
     const merged: PanelRow[] = []
     const seen = new Set<string>()
-    // Catalog order is oldest-first, so the descending recency key makes
-    // unobserved rows rank newest-first below any observed run.
+    // The catalog arrives in stable pre-order (a parent always precedes its
+    // descendants), so pushing rows in catalog order preserves the tree.
     for (let index = 0; index < catalog.length; index++) {
       const entry = catalog[index]
       if (entry === undefined) continue
@@ -279,11 +280,8 @@ export function apply(ctx: Context): void {
         ...(observed.endedAt !== undefined ? { endedAt: observed.endedAt } : {}),
       })
     }
-    merged.sort((a, b) => {
-      const keyA = a.startedAt ?? a.sortKey ?? Number.NEGATIVE_INFINITY
-      const keyB = b.startedAt ?? b.sortKey ?? Number.NEGATIVE_INFINITY
-      return keyB - keyA
-    })
+    // No re-sort: catalog pre-order is the tree order; event-only rows
+    // appended above trail the list in start order.
     return merged
   }
 
@@ -447,12 +445,8 @@ export function apply(ctx: Context): void {
       if (purpose !== undefined) row.purpose = purpose
       merged.push(row)
     }
-    merged.sort((a, b) => {
-      const keyA = a.startedAt ?? a.sortKey ?? Number.NEGATIVE_INFINITY
-      const keyB = b.startedAt ?? b.sortKey ?? Number.NEGATIVE_INFINITY
-      return keyB - keyA
-    })
-
+    // No re-sort: catalog pre-order is the tree order; event-only rows
+    // appended above trail the list in start order.
     return {
       currentId: sessionId,
       rootId,

@@ -237,12 +237,8 @@ export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
     if (!wide) commit({ open: false })
   }, [wide])
 
-  const ordered = [...monitor.rows].sort((a, b) => {
-    const ka = a.startedAt ?? a.sortKey ?? Number.NEGATIVE_INFINITY
-    const kb = b.startedAt ?? b.sortKey ?? Number.NEGATIVE_INFINITY
-    return kb - ka
-  })
-  const visible = ordered.filter(row => !monitor.hidden.includes(row.id))
+  // Rows arrive in tree pre-order (parent before child) from the host.
+  const visible = monitor.rows.filter(row => !monitor.hidden.includes(row.id))
   const running = visible.filter(row => row.status === 'running').length
   const done = visible.filter(row => row.status === 'completed').length
   const failed = visible.filter(row =>
