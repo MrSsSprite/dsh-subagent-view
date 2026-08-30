@@ -1,0 +1,424 @@
+/**
+ * subagent-view, browser half: the conversation "Subagents" view tab.
+ *
+ * One list entry in the `conversation.view` slot renders the root→current
+ * breadcrumb, the running/done/failed summary strip, and the host-order
+ * subagent tree. The tab polls the host half's `/api/subagent-view/tab`
+ * route once per second while mounted, so a page refresh recovers the whole
+ * forest without any model interaction. All styling lives in the single
+ * `<style data-plugin="subagent-view">` tag in src/client/index.ts.
+ */
+import {
+  Fragment,
+  useEffect, useState, useSyncExternalStore,
+  type ReactElement,
+} from 'react'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client' // adds 'conversation.view' to SlotMap
+import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
+
+// ---- wire shape shared with the node half ----
+
+interface AncestorRow {
+  id: string
+  label: string
+  depth: number
+  isCurrent: boolean
+}
+
+interface TabRow {
+  id: string
+  label?: string
+  mode?: string
+  depth: number
+  parentId?: string
+  runId?: string
+  provider?: string
+  local?: boolean
+  startedAt?: number
+  endedAt?: number
+  status: string
+  sortKey?: number
+  isCurrent: boolean
+  hasChildren: boolean
+  activity?: string
+  reason?: string
+  purpose?: string
+}
+
+interface TabPayload {
+  currentId: string
+  rootId?: string
+  now: number
+  ancestors: AncestorRow[]
+  rows: TabRow[]
+}
+
+// ---- page-local store (one instance per page) ----
+
+interface TabState {
+  sessionId: string | undefined
+  now: number
+  ancestors: AncestorRow[]
+  rows: TabRow[]
+}
+
+const listeners = new Set<() => void>()
+let state: TabState = { sessionId: undefined, now: Date.now(), ancestors: [], rows: [] }
+let polling = false
+
+const commit = (patch: Partial<TabState>): void => {
+  state = { ...state, ...patch }
+  for (const listener of [...listeners]) listener()
+}
+const subscribe = (listener: () => void): (() => void) => {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+const getSnapshot = (): TabState => state
+
+const useTab = (): TabState => useSyncExternalStore(subscribe, getSnapshot)
+
+async function refresh(sessionId: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/subagent-view/tab?sessionId=${encodeURIComponent(sessionId)}`)
+    const data = await res.json() as TabPayload
+    if (data.currentId !== state.sessionId) return
+    commit({ ancestors: data.ancestors ?? [], rows: data.rows ?? [], now: data.now ?? Date.now() })
+  } catch {
+    // Transient network failure: the next tick retries.
+  }
+}
+
+// ---- helpers ----
+
+interface StatusMeta {
+  cls: string
+  label: string
+}
+
+const UNKNOWN: StatusMeta = { cls: 'sat-dot-off', label: 'Unknown' }
+
+const STATUS: Record<string, StatusMeta> = {
+  running: { cls: 'sat-dot-running', label: 'Running' },
+  completed: { cls: 'sat-dot-ok', label: 'Done' },
+  error: { cls: 'sat-dot-error', label: 'Failed' },
+  aborted: { cls: 'sat-dot-warn', label: 'Interrupted' },
+  'max-tokens': { cls: 'sat-dot-warn', label: 'Token limit' },
+  refusal: { cls: 'sat-dot-warn', label: 'Refused' },
+}
+
+// ---- status marker: DSH-native StateDot spec (copied from panel.tsx) ----
+// ongoing = pixel-art chase around the 3x3 outer ring; terminal states =
+// solid core + 10% same-color halo.
+
+/** Outer 3x3 matrix cells (2px pixels on a 10px grid), clockwise from top-left. */
+const CHASE_CELLS: readonly (readonly [number, number])[] = [
+  [0, 0], [4, 0], [8, 0], [8, 4], [8, 8], [4, 8], [0, 8], [0, 4],
+]
+
+function StatusDot({ status }: { status: string }): ReactElement {
+  if (status === 'running') {
+    return (
+      <svg
+        className="sat-dot sat-dot-running"
+        width={10}
+        height={10}
+        viewBox="0 0 10 10"
+        shapeRendering="crispEdges"
+        aria-hidden="true"
+      >
+        {CHASE_CELLS.map(([x, y], index) => (
+          <rect
+            key={`${x}-${y}`}
+            className="sat-dot-cell"
+            x={x}
+            y={y}
+            width="2"
+            height="2"
+            /* Negative delay phases the chase so every cell animates from mount. */
+            style={{ animationDelay: `${(index - CHASE_CELLS.length) * 125}ms` }}
+          />
+        ))}
+      </svg>
+    )
+  }
+  const meta = STATUS[status] ?? UNKNOWN
+  return <span className={`sat-dot ${meta.cls}`} aria-hidden="true" />
+}
+
+function fmtDuration(start: number | undefined, end: number | undefined): string {
+  if (start === undefined) return '—'
+  const ms = (end ?? Date.now()) - start
+  if (ms < 0) return '00:00'
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`
+}
+
+const shortId = (id: string | undefined): string =>
+  id === undefined || id.length <= 8 ? id ?? '—' : id.slice(0, 8)
+
+const fmtTime = (ms: number): string => new Date(ms).toLocaleString()
+
+const outcomeLabel = (status: string): string => STATUS[status]?.label ?? 'Unknown'
+
+function rowLabel(row: TabRow): string {
+  if (typeof row.label === 'string' && row.label !== '') return row.label
+  if (typeof row.provider === 'string' && row.provider !== '') return row.provider
+  return `subagent ${shortId(row.id)}`
+}
+
+function providerChipText(provider: string): string {
+  if (provider === 'fork') return '⑂ fork'
+  if (provider === 'spawn') return '✦ spawn'
+  return provider
+}
+
+function toggleMember(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  const next = new Set(set)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  return next
+}
+
+// ---- sub-render pieces ----
+
+function SummaryCell({ caption, count, status }: {
+  caption: string
+  count: number
+  status: 'running' | 'completed' | 'error'
+}): ReactElement {
+  return (
+    <span className="sat-sum-cell">
+      <span className="sat-sum-num">{count}</span>
+      <StatusDot status={status} />
+      <span className="sat-sum-caption">{caption}</span>
+    </span>
+  )
+}
+
+function ModeChip({ mode }: { mode: string | undefined }): ReactElement | null {
+  if (mode === 'continuable') {
+    return <span className="sat-mode-chip sat-mode-chip-brand">↻ continuable</span>
+  }
+  if (mode === 'one-shot') {
+    return <span className="sat-mode-chip sat-mode-chip-neutral">⚡ one-shot</span>
+  }
+  return null
+}
+
+function detailsFields(row: TabRow): [string, string][] {
+  const fields: [string, string][] = []
+  if (row.startedAt !== undefined) fields.push(['Started', fmtTime(row.startedAt)])
+  if (row.endedAt !== undefined) fields.push(['Ended', fmtTime(row.endedAt)])
+  fields.push(['Outcome', outcomeLabel(row.status)])
+  if (row.parentId !== undefined) fields.push(['Parent', shortId(row.parentId)])
+  if (row.activity !== undefined) fields.push(['Activity', row.activity])
+  fields.push(['Has children', row.hasChildren ? 'yes' : 'no'])
+  if (row.reason !== undefined) fields.push(['Unreadable', row.reason])
+  return fields
+}
+
+function DetailsBlock({ row }: { row: TabRow }): ReactElement {
+  return (
+    <dl className="sat-details">
+      {detailsFields(row).map(([key, value]) => (
+        <Fragment key={key}>
+          <dt>{key}</dt>
+          <dd>{value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  )
+}
+
+function rawFields(row: TabRow): [string, string][] {
+  const fields: [string, string][] = [['id', row.id]]
+  if (row.runId !== undefined) fields.push(['runId', row.runId])
+  if (row.local !== undefined) fields.push(['local', String(row.local)])
+  fields.push(['depth', String(row.depth)])
+  if (row.sortKey !== undefined) fields.push(['sortKey', String(row.sortKey)])
+  if (row.mode !== undefined) fields.push(['mode', row.mode])
+  if (row.provider !== undefined) fields.push(['provider', row.provider])
+  fields.push(['isCurrent', String(row.isCurrent)])
+  if (row.purpose !== undefined) fields.push(['purpose', row.purpose])
+  return fields
+}
+
+function RawPopover({ row }: { row: TabRow }): ReactElement {
+  return (
+    <div className="sat-popover">
+      {rawFields(row).map(([key, value]) => (
+        <div key={key} className="sat-pop-row">
+          <span className="sat-pop-key">{key}:</span>
+          <span className="sat-pop-value">{value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---- component ----
+
+type TabProps = PropsRuntime<'conversation.view'> & {
+  open(id: SessionId): void
+  openSubagent(address: SubagentAddress): void
+}
+
+export function SubagentsView(props: TabProps): ReactElement {
+  const { sessionId, open } = props
+  const tab = useTab()
+
+  // Track the current session; the first poll of a new session pulls the
+  // durable catalog + event history, which is what makes refresh recovery work.
+  useEffect(() => {
+    if (sessionId !== state.sessionId) {
+      commit({ sessionId, ancestors: [], rows: [] })
+      void refresh(sessionId)
+    }
+  }, [sessionId])
+
+  // 1s polling while mounted; the tab is mounted only while it is active.
+  useEffect(() => {
+    if (polling) return
+    polling = true
+    const timer = window.setInterval(() => {
+      const sid = state.sessionId
+      if (sid !== undefined) void refresh(sid)
+    }, 1000)
+    return () => {
+      window.clearInterval(timer)
+      polling = false
+    }
+  }, [])
+
+  // Per-row expanded blocks, keyed by row id.
+  const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(() => new Set())
+  const [rawOpen, setRawOpen] = useState<ReadonlySet<string>>(() => new Set())
+
+  const { ancestors, rows, now } = tab
+  const running = rows.filter(row => row.status === 'running').length
+  const done = rows.filter(row => row.status === 'completed').length
+  const failed = rows.filter(row =>
+    row.status === 'error' || row.status === 'aborted' || row.status === 'max-tokens' || row.status === 'refusal',
+  ).length
+  const total = rows.length
+  const pct = (count: number): number => total === 0 ? 0 : Math.round((count / total) * 100)
+
+  return (
+    <div className="sat-root">
+      {ancestors.length > 0
+        ? (
+          <nav className="sat-crumbs" aria-label="Subagent lineage">
+            {ancestors.map((ancestor, index) => {
+              const crumb = ancestor.isCurrent
+                ? (
+                  <span className="sat-crumb sat-crumb-current" title="You are here">
+                    {ancestor.label}
+                  </span>
+                  )
+                : (
+                  <button
+                    className="sat-crumb sat-crumb-link"
+                    type="button"
+                    title={ancestor.label}
+                    onClick={() => open(ancestor.id as SessionId)}
+                  >
+                    {ancestor.label}
+                  </button>
+                  )
+              return (
+                <Fragment key={ancestor.id}>
+                  {index > 0 ? <span className="sat-crumb-sep" aria-hidden="true">/</span> : null}
+                  {crumb}
+                </Fragment>
+              )
+            })}
+          </nav>
+          )
+        : null}
+
+      <div className="sat-summary">
+        <div className="sat-sum-cells">
+          <SummaryCell caption="Running" count={running} status="running" />
+          <SummaryCell caption="Done" count={done} status="completed" />
+          <SummaryCell caption="Failed" count={failed} status="error" />
+        </div>
+        <div className="sat-sum-bar">
+          <div
+            className="sat-proportion"
+            role="img"
+            aria-label={`${running} running, ${done} done, ${failed} failed`}
+          >
+            <span className="sat-prop-seg sat-prop-running" style={{ width: `${pct(running)}%` }} />
+            <span className="sat-prop-seg sat-prop-done" style={{ width: `${pct(done)}%` }} />
+            <span className="sat-prop-seg sat-prop-failed" style={{ width: `${pct(failed)}%` }} />
+          </div>
+          <span className="sat-sum-total">total {total}</span>
+        </div>
+      </div>
+
+      {rows.length === 0
+        ? (
+          <div className="sat-empty">No subagent activity in this session</div>
+          )
+        : (
+          <div className="sat-tree">
+            {rows.map(row => {
+              const depth = typeof row.depth === 'number' ? row.depth : 0
+              const indent = Math.max(0, depth) * 14
+              const label = rowLabel(row)
+              const elapsed = row.status === 'running'
+                ? fmtDuration(row.startedAt, now)
+                : fmtDuration(row.startedAt, row.endedAt)
+              return (
+                <div
+                  key={row.id}
+                  className={`sat-row${row.isCurrent ? ' sat-row-current' : ''}`}
+                  style={{ marginLeft: indent }}
+                >
+                  {indent > 0 ? <span className="sat-row-guide" aria-hidden="true" /> : null}
+                  <div className="sat-row-main">
+                    <StatusDot status={row.status} />
+                    <ModeChip mode={row.mode} />
+                    <span className="sat-label" title={label}>{label}</span>
+                    {typeof row.provider === 'string' && row.provider !== ''
+                      ? <span className="sat-provider-chip">{providerChipText(row.provider)}</span>
+                      : null}
+                    <span className="sat-duration">{elapsed}</span>
+                    <span className="sat-row-actions">
+                      <button
+                        className="sat-row-btn"
+                        type="button"
+                        title="Details"
+                        onClick={() => setDetailsOpen(prev => toggleMember(prev, row.id))}
+                      >
+                        ⓘ
+                      </button>
+                      <button
+                        className="sat-row-btn"
+                        type="button"
+                        title="Raw fields"
+                        onClick={() => setRawOpen(prev => toggleMember(prev, row.id))}
+                      >
+                        …
+                      </button>
+                    </span>
+                  </div>
+                  {typeof row.purpose === 'string' && row.purpose !== ''
+                    ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
+                    : null}
+                  {detailsOpen.has(row.id) ? <DetailsBlock row={row} /> : null}
+                  {rawOpen.has(row.id) ? <RawPopover row={row} /> : null}
+                </div>
+              )
+            })}
+          </div>
+          )}
+    </div>
+  )
+}

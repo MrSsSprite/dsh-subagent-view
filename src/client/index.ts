@@ -4,8 +4,9 @@
  * panel live in ./panel.tsx, registered into the `sidebar.footer.action`
  * seat at the bottom of the left sidebar.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
 import { SubagentViewBarPanel, setSessionsService, type MonitorSessionsService } from './panel'
+import { SubagentsView } from './subagents-tab'
 
 export const inject = ['slots', 'sessions', 'layout']
 
@@ -177,6 +178,185 @@ export function apply(ctx: ClientContext): void {
   background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
 }
 .sav-back { color: var(--dsw-alias-brand-primary, #2563eb); border-color: var(--dsw-alias-brand-primary, #2563eb); }
+/* ---- Subagents tab (conversation.view) ---- */
+.sat-root {
+  display: flex; flex-direction: column; gap: 8px;
+  width: 100%; min-width: 0; height: 100%; min-height: 0;
+  font-family: var(--dsw-font-family, inherit);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.sat-crumbs {
+  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+}
+.sat-crumb { font-size: 12px; line-height: 18px; }
+.sat-crumb-link {
+  border: none; background: transparent; padding: 0; cursor: pointer;
+  color: var(--dsw-alias-brand-primary, #2563eb);
+  font-family: inherit; font-size: 12px; line-height: 18px;
+}
+.sat-crumb-link:hover { text-decoration: underline; }
+.sat-crumb-current {
+  color: var(--dsw-alias-label-primary, inherit);
+  font-weight: 600;
+}
+.sat-crumb-sep { color: var(--dsw-alias-label-tertiary, #94a3b8); }
+.sat-summary {
+  flex: none; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.07));
+  border-radius: 8px;
+}
+.sat-sum-cells { display: flex; align-items: center; gap: 20px; }
+.sat-sum-cell { display: inline-flex; align-items: center; gap: 6px; }
+.sat-sum-num {
+  font-size: 24px; line-height: 28px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.sat-sum-caption {
+  font-size: 11px; line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+}
+.sat-sum-bar { display: flex; align-items: center; gap: 10px; }
+.sat-proportion {
+  flex: 1; min-width: 0; height: 6px; border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-1, rgba(15, 23, 42, 0.06));
+  display: flex; overflow: hidden;
+}
+.sat-prop-seg { height: 100%; }
+.sat-prop-running { background: var(--dsw-static-deepseek-450, rgb(86, 134, 254)); }
+.sat-prop-done { background: var(--dsw-alias-state-success-primary, rgb(34, 197, 94)); }
+.sat-prop-failed { background: var(--dsw-alias-state-error-primary, rgb(236, 19, 19)); }
+.sat-sum-total {
+  flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-variant-numeric: tabular-nums; font-size: 11px; line-height: 16px;
+}
+.sat-tree {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 4px;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2, rgba(15, 23, 42, 0.15));
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2, rgba(15, 23, 42, 0.25));
+}
+.sat-empty { flex: 1; padding: 24px 12px; text-align: center; color: var(--dsw-alias-label-tertiary, #94a3b8); }
+.sat-row {
+  position: relative; flex: none;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.07));
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.sat-row-current {
+  border-left: 3px solid var(--dsw-alias-brand-primary, #2563eb);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
+}
+.sat-row-guide {
+  position: absolute; top: 0; bottom: 0; left: -7px; width: 1px;
+  background: var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.10));
+}
+.sat-row-main { display: flex; align-items: center; gap: 6px; }
+.sat-label {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600; font-size: 12px; line-height: 18px;
+}
+.sat-provider-chip {
+  flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-size: 11px; line-height: 16px; white-space: nowrap;
+}
+.sat-mode-chip {
+  flex: none; font-size: 10px; line-height: 16px; padding: 0 6px;
+  border-radius: 999px; border: 1px solid; white-space: nowrap;
+}
+.sat-mode-chip-brand {
+  color: var(--dsw-alias-brand-primary, #2563eb);
+  border-color: var(--dsw-alias-brand-primary, #2563eb);
+}
+.sat-mode-chip-neutral {
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  border-color: var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.12));
+}
+.sat-duration {
+  flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-variant-numeric: tabular-nums; font-size: 11px; line-height: 16px;
+  white-space: nowrap;
+}
+.sat-row-actions { flex: none; display: inline-flex; gap: 2px; }
+.sat-row-btn {
+  flex: none; width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.12));
+  background: transparent; color: var(--dsw-alias-label-tertiary, #94a3b8);
+  border-radius: 6px; font-size: 12px; line-height: 1; cursor: pointer;
+  font-family: inherit;
+}
+.sat-row-btn:hover {
+  border-color: var(--dsw-alias-border-l2, rgba(15, 23, 42, 0.3));
+  background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
+}
+.sat-purpose {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-size: 11px; line-height: 16px;
+  margin-top: 2px; padding-left: 16px;
+}
+.sat-details {
+  display: grid; grid-template-columns: max-content 1fr;
+  column-gap: 12px; row-gap: 2px;
+  margin: 6px 0 0; padding: 6px 8px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.06));
+}
+.sat-details dt, .sat-details dd {
+  font-size: 12px; line-height: 18px; margin: 0;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-weight: 400;
+}
+.sat-popover {
+  position: absolute; right: 8px; top: 100%; z-index: 20;
+  margin-top: 4px; min-width: 240px; max-width: 320px;
+  background: var(--dsw-alias-bg-base, #ffffff);
+  border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.08));
+  border-radius: 8px;
+  box-shadow: var(--dsw-shadow-lv2, 0 8px 24px rgba(15, 23, 42, 0.12));
+  padding: 6px 8px;
+}
+.sat-pop-row { display: flex; gap: 8px; }
+.sat-pop-key {
+  flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 18px;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.sat-pop-value {
+  flex: 1; min-width: 0; word-break: break-all;
+  font-size: 11px; line-height: 18px;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+}
+/* Status dots: pixel-chase running + terminal-core states (sat prefix). */
+.sat-dot { width: 10px; height: 10px; flex: none; }
+.sat-dot-running { color: var(--dsw-static-deepseek-450, rgb(86, 134, 254)); }
+.sat-dot-cell { fill: currentColor; opacity: 0.15; animation: sat-dot-chase 1s infinite; }
+@keyframes sat-dot-chase {
+  0%, 12.4% { opacity: 1; }
+  12.5%, 24.9% { opacity: 0.6; }
+  25%, 37.4% { opacity: 0.35; }
+  37.5%, 100% { opacity: 0.15; }
+}
+.sat-dot-ok, .sat-dot-error, .sat-dot-warn, .sat-dot-off {
+  position: relative; display: inline-block;
+}
+.sat-dot-ok::before, .sat-dot-error::before, .sat-dot-warn::before, .sat-dot-off::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: currentColor; opacity: 0.1;
+}
+.sat-dot-ok::after, .sat-dot-error::after, .sat-dot-warn::after, .sat-dot-off::after {
+  content: ''; position: absolute; inset: 20%; border-radius: 50%;
+  background: currentColor;
+}
+.sat-dot-ok { color: var(--dsw-alias-state-success-primary, rgb(34, 197, 94)); }
+.sat-dot-error { color: var(--dsw-alias-state-error-primary, rgb(236, 19, 19)); }
+.sat-dot-warn { color: var(--dsw-alias-state-warn-primary, rgb(245, 158, 11)); }
+.sat-dot-off { color: var(--dsw-alias-label-tertiary, #cbd5e1); }
 `
     document.head.appendChild(tag)
     return () => { tag.remove() }
@@ -192,6 +372,26 @@ export function apply(ctx: ClientContext): void {
         inject: () => ({ toggleSidebar: () => ctx.layout.toggleSidebar() }),
       },
       SubagentViewBarPanel,
+    ),
+  )
+
+  // The client sessions service is typed as the host-side `SessionStore` here;
+  // cast to the narrow face panel.tsx already captures (open/openSubagent).
+  const sessions = ctx.sessions as unknown as MonitorSessionsService
+  ctx.slots.inject(
+    'conversation.view',
+    () => ctx.slots.register(
+      {
+        name: 'conversation.view',
+        id: 'subagent-view',
+        order: 30,
+        label: 'Subagents',
+        inject: (_sessionId: SessionId) => ({
+          open: (id: SessionId) => sessions.open(id),
+          openSubagent: (address: SubagentAddress) => sessions.openSubagent(address),
+        }),
+      },
+      SubagentsView,
     ),
   )
 }

@@ -76,6 +76,50 @@ interface PanelRow {
   sortKey?: number
 }
 
+/** One root→current breadcrumb entry for the tab route. */
+interface AncestorRow {
+  id: string
+  label: string
+  depth: number
+  isCurrent: boolean
+}
+
+/**
+ * One tab row: an observed run enriched with durable catalog facts plus the
+ * live activity / hasChildren / reason fields, the current-session marker and
+ * the child's first post-seed user prompt (`purpose`). Optional members are
+ * omitted rather than set to undefined so nothing undefined reaches the wire.
+ */
+interface TabRow {
+  id: string
+  label?: string
+  mode?: string
+  depth: number
+  parentId?: string
+  runId?: string
+  provider?: string
+  local?: boolean
+  startedAt?: number
+  endedAt?: number
+  status: string
+  /** Newest-first key for catalog rows that were never observed running. */
+  sortKey?: number
+  isCurrent: boolean
+  hasChildren: boolean
+  activity?: string
+  reason?: string
+  purpose?: string
+}
+
+/** Payload of `GET /api/subagent-view/tab`. */
+interface TabPayload {
+  currentId: string
+  rootId?: string
+  now: number
+  ancestors: AncestorRow[]
+  rows: TabRow[]
+}
+
 /** Maximum number of observed rows kept per root session. */
 const MAX_ROWS_PER_ROOT = 200
 /** Parent-chain hop budget when resolving a child to its root session. */
@@ -243,6 +287,181 @@ export function apply(ctx: Context): void {
     return merged
   }
 
+  /**
+   * First post-seed user prompt of a child session, used as a short
+   * human-readable purpose on the tab row. Returns undefined when the session
+   * is not live or has no post-seed user message.
+   */
+  const purposeFor = (id: string): string | undefined => {
+    const session = ctx.sessions.get(id as SessionId)
+    if (session === undefined) return undefined
+    const seed = session.header.seedLength ?? 0
+    for (const event of session.events) {
+      if (event.seq < seed) continue
+      if (event.type !== 'user/message') continue
+      const text = event.data.content
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join(' ')
+        .trim()
+      return text.slice(0, 500)
+    }
+    return undefined
+  }
+
+  /**
+   * Build the root-anchored tab payload: the descendant catalog (rooted at the
+   * session's resolved root) merged with the observed event rows, each row
+   * carrying the new activity / hasChildren / reason / purpose fields and the
+   * current-session marker, plus a root→current ancestor breadcrumb.
+   */
+  const tabFor = async (sessionId: string): Promise<TabPayload> => {
+    const rootId = rootOf(sessionId) ?? sessionId
+
+    let catalog: Awaited<ReturnType<typeof ctx.subagents.listDescendants>> = []
+    try {
+      catalog = await ctx.subagents.listDescendants(rootId as SessionId)
+    } catch {
+      catalog = []
+    }
+
+    const eventRows: RunRow[] = []
+    for (const row of runs.values()) {
+      if (row.rootId === rootId) eventRows.push({ ...row })
+    }
+    eventRows.sort((a, b) => a.startedAt - b.startedAt)
+
+    // Ancestor facts: the root itself plus every child/diagnostic catalog
+    // entry, so the breadcrumb walk can resolve label, depth and parent id.
+    const ancestorFacts = new Map<string, { label?: string; parentId?: string; depth?: number }>()
+    ancestorFacts.set(rootId, { label: 'Main session', depth: 0 })
+    for (let index = 0; index < catalog.length; index++) {
+      const entry = catalog[index]
+      if (entry === undefined) continue
+      ancestorFacts.set(asString(entry.id), {
+        ...(entry.kind === 'child' && entry.label !== undefined ? { label: entry.label } : {}),
+        parentId: asString(entry.parentId),
+        depth: entry.depth,
+      })
+    }
+
+    // Breadcrumb: walk from the current session up to the root, then reverse
+    // into root→current order. A node missing from the map falls back to a
+    // derived label and the parent-relative depth hint.
+    const ancestors: AncestorRow[] = []
+    if (sessionId === rootId) {
+      ancestors.push({ id: rootId, label: 'Main session', depth: 0, isCurrent: true })
+    } else {
+      const chain: AncestorRow[] = []
+      let cursor = sessionId
+      let hops = 0
+      let depthHint = 0
+      while (hops <= MAX_ROOT_HOPS) {
+        const facts = ancestorFacts.get(cursor)
+        const isRoot = cursor === rootId
+        const label = facts?.label ?? (isRoot ? 'Main session' : 'subagent ' + cursor.slice(0, 8))
+        const depth = facts?.depth ?? (isRoot ? 0 : depthHint)
+        chain.push({ id: cursor, label, depth, isCurrent: cursor === sessionId })
+        if (isRoot) break
+        const parentId = facts?.parentId
+        if (parentId === undefined || parentId === cursor) break
+        depthHint = depth - 1
+        cursor = parentId
+        hops += 1
+      }
+      chain.reverse()
+      ancestors.push(...chain)
+    }
+
+    // Merge the catalog with observed event rows, mirroring `enrich` but
+    // carrying the tab-specific fields (activity/hasChildren/reason/purpose
+    // and the current marker).
+    const merged: TabRow[] = []
+    const seen = new Set<string>()
+    for (let index = 0; index < catalog.length; index++) {
+      const entry = catalog[index]
+      if (entry === undefined) continue
+      const id = asString(entry.id)
+      seen.add(id)
+      const base = {
+        id,
+        depth: entry.depth,
+        parentId: asString(entry.parentId),
+        isCurrent: id === sessionId,
+        hasChildren: entry.kind === 'child' ? entry.hasChildren : false,
+      }
+      const purpose = purposeFor(id)
+      const observed = eventRows.find(row => row.id === id)
+      if (observed !== undefined) {
+        const row: TabRow = {
+          ...base,
+          runId: observed.runId,
+          provider: observed.provider,
+          local: observed.local,
+          startedAt: observed.startedAt,
+          status: observed.status,
+        }
+        if (entry.kind === 'child') {
+          if (entry.label !== undefined) row.label = entry.label
+          row.mode = entry.mode
+          row.activity = entry.activity
+        } else {
+          row.reason = entry.reason
+        }
+        if (observed.endedAt !== undefined) row.endedAt = observed.endedAt
+        if (purpose !== undefined) row.purpose = purpose
+        merged.push(row)
+      } else {
+        const row: TabRow = {
+          ...base,
+          local: true,
+          sortKey: -(catalog.length - index),
+          status: entry.kind === 'child' && entry.activity === 'running' ? 'running' : 'unknown',
+        }
+        if (entry.kind === 'child') {
+          if (entry.label !== undefined) row.label = entry.label
+          row.mode = entry.mode
+          row.activity = entry.activity
+        } else {
+          row.reason = entry.reason
+        }
+        if (purpose !== undefined) row.purpose = purpose
+        merged.push(row)
+      }
+    }
+    for (const observed of eventRows) {
+      if (seen.has(observed.id)) continue
+      const purpose = purposeFor(observed.id)
+      const row: TabRow = {
+        id: observed.id,
+        depth: 0,
+        runId: observed.runId,
+        provider: observed.provider,
+        local: observed.local,
+        startedAt: observed.startedAt,
+        status: observed.status,
+        isCurrent: observed.id === sessionId,
+        hasChildren: false,
+      }
+      if (observed.endedAt !== undefined) row.endedAt = observed.endedAt
+      if (purpose !== undefined) row.purpose = purpose
+      merged.push(row)
+    }
+    merged.sort((a, b) => {
+      const keyA = a.startedAt ?? a.sortKey ?? Number.NEGATIVE_INFINITY
+      const keyB = b.startedAt ?? b.sortKey ?? Number.NEGATIVE_INFINITY
+      return keyB - keyA
+    })
+
+    return {
+      currentId: sessionId,
+      rootId,
+      now: Date.now(),
+      ancestors,
+      rows: merged,
+    }
+  }
+
   ctx.effect(() => {
     return ctx.webServer.register({
       kind: 'exact',
@@ -263,4 +482,23 @@ export function apply(ctx: Context): void {
       },
     })
   }, 'subagent-view: snapshot route')
+
+  ctx.effect(() => {
+    return ctx.webServer.register({
+      kind: 'exact',
+      path: '/api/subagent-view/tab',
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')
+        const payload = sessionId === null
+          ? { currentId: '', now: Date.now(), ancestors: [], rows: [] }
+          : await tabFor(sessionId)
+        res.writeHead(200, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        })
+        res.end(JSON.stringify(payload))
+      },
+    })
+  }, 'subagent-view: tab route')
 }
