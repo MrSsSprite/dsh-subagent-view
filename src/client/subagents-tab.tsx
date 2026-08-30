@@ -318,8 +318,23 @@ export function SubagentsView(props: TabProps): ReactElement {
     }
   }, [])
 
-  // Per-row floating details windows, keyed by row id.
-  const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(() => new Set())
+  // The row id of the single floating details window, or null when closed.
+  const [detailsOpen, setDetailsOpen] = useState<string | null>(null)
+
+  // Close the floating window on any pointer-down outside it. The toggle
+  // button is exempt (its click handler opens/closes), and so is the window
+  // itself, so interacting with either never dismisses it mid-click.
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.sat-popover') !== null) return
+      if (target.closest('.sat-row-btn') !== null) return
+      setDetailsOpen(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [])
 
   // Branch collapse state, keyed by row id. Empty set = every branch expanded,
   // which is the tab's default; a branch toggled shut stays collapsed across
@@ -439,7 +454,7 @@ export function SubagentsView(props: TabProps): ReactElement {
                           className="sat-row-btn"
                           type="button"
                           title="Details"
-                          onClick={() => setDetailsOpen(prev => toggleMember(prev, row.id))}
+                          onClick={() => setDetailsOpen(prev => (prev === row.id ? null : row.id))}
                         >
                           ⓘ
                         </button>
@@ -448,7 +463,7 @@ export function SubagentsView(props: TabProps): ReactElement {
                     {typeof row.purpose === 'string' && row.purpose !== ''
                       ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
                       : null}
-                    {detailsOpen.has(row.id) ? <DetailsPopover row={row} /> : null}
+                    {detailsOpen === row.id ? <DetailsPopover row={row} /> : null}
                   </div>
                 )
               }}
