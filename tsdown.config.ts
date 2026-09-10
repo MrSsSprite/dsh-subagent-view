@@ -9,16 +9,25 @@
 // `main`/`exports` require `lib/index.js`.
 const ID = 'subagent-view'
 
-/** Specifiers the loader module table answers (platform seeds + preloaded runtime). */
+/**
+ * Specifiers the browser module table (DSH 0.1.2-rc.1 static seed table +
+ * preloaded client modules) answers, i.e. the ids the built bundle may
+ * `require()` at runtime. Everything else is bundled.
+ *
+ * The seed table of 0.1.2-rc.1 is `react`, `react/jsx-runtime`, `react-dom`,
+ * `react-dom/client`, `@deepseek-ai/cordis`,
+ * `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-slots` and
+ * `@deepseek-ai/dsh-client-ui-primitives`.
+ */
 const CLIENT_EXTERNALS = [
   'react',
   'react/jsx-runtime',
   'react-dom',
   'react-dom/client',
   '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 /** Specifiers the Node half imports from a real install (production deps + peers). */

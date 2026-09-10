@@ -15,7 +15,8 @@
  */
 import { z } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SubagentRunEndInfo, SubagentRunInfo } from '@deepseek-ai/dsh-subagent'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 // Loads the Context augmentations that provide `ctx.sessions`,
@@ -24,6 +25,18 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Loads the Context augmentation that provides `ctx.sessionProjections`.
 import type {} from '@deepseek-ai/dsh-session-projection'
+// Loads the Context augmentations that provide the cold-read services
+// `ctx.sessionProjectionCache` and `ctx.sessionQuery`. Both are read through
+// `ctx.get`, so the plugins that provide them stay optional.
+import type {} from '@deepseek-ai/dsh-session-projection-cache'
+// The cold log read goes through `ctx.sessionQuery` (which serves live and
+// persisted sessions alike), so the persistence backend itself is never called
+// directly. The import keeps the declared peer surface honest: a deployment
+// that composes `sessionQuery` over persistence is exactly what this cold path
+// requires, and the augmentation proves the service name this plugin's
+// `durableHeaders` comment refers to.
+import type {} from '@deepseek-ai/dsh-session-persistence'
+import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 
 /**
  * Durable outcome projection unit: folds each turn's end reason after the
@@ -141,13 +154,28 @@ interface TabRow {
   activeThrough?: number
 }
 
-/** Payload of `GET /api/subagent-view/tab`. */
+/**
+ * Payload of `GET /api/subagent-view/tab`.
+ *
+ * `error` is diagnostic only and never a failure signal: both routes answer
+ * `200` with a well-formed payload for every input, so a client can always
+ * trust a non-2xx/parse failure to mean "network", not "the handler crashed".
+ */
 interface TabPayload {
   currentId: string
   rootId?: string
   now: number
   ancestors: AncestorRow[]
   rows: TabRow[]
+  error?: string
+}
+
+/** Payload of `GET /api/subagent-view/snapshot`; see {@link TabPayload} on `error`. */
+interface SnapshotPayload {
+  sessionId?: string
+  now: number
+  rows: PanelRow[]
+  error?: string
 }
 
 /** Maximum number of observed rows kept per root session. */
@@ -359,31 +387,33 @@ export function apply(ctx: Context): void {
    * First post-seed user prompt of a child session, used as a short
    * human-readable purpose on the tab row. Returns undefined when the session
    * is not live or has no post-seed user message.
+   *
+   * The child's own log is read through `Session.ownEvents()`, which returns
+   * exactly the events after the fork-inherited prefix — the same cut the old
+   * `header.seedLength` filter expressed. DSH 0.1.2-rc.1 removed both the
+   * `Session.events` accessor and `SessionHeader.seedLength`, so reading either
+   * one threw `TypeError` here and turned `/api/subagent-view/tab` into a
+   * body-less HTTP 400 (see docs/DIAGNOSIS-0.1.2-rc.1.md, S2).
    */
   const purposeFor = (id: string): string | undefined => {
     const session = ctx.sessions.get(id as SessionId)
     if (session === undefined) return undefined
-    const seed = session.header.seedLength ?? 0
-    for (const event of session.events) {
-      if (event.seq < seed) continue
-      if (event.type !== 'user/message') continue
-      const text = event.data.content
-        .filter(block => block.type === 'text')
-        .map(block => block.text)
-        .join(' ')
-        .trim()
-      return text.slice(0, 500)
+    try {
+      for (const event of session.ownEvents()) {
+        if (event.type !== 'user/message') continue
+        const text = event.data.content
+          .filter(block => block.type === 'text')
+          .map(block => block.text)
+          .join(' ')
+          .trim()
+        return text.slice(0, 500)
+      }
+    } catch (error) {
+      // Same rule as every other per-row read: a degraded `purpose` must not
+      // be able to take a row — or the route — with it.
+      ctx.logger.warn(`subagent-view: own-log read failed for ${id}: ${String(error)}`)
     }
     return undefined
-  }
-
-  /** Minimal faces of the optional cold-read services (read defensively). */
-  interface ProjectionCacheFace {
-    cachedSnapshot(meta: SessionHeader): { values: Record<string, unknown> } | undefined
-    coldSnapshot(id: string): Promise<{ values: Record<string, unknown> }>
-  }
-  interface PersistenceListFace {
-    list(): Promise<SessionHeader[]>
   }
 
   /** Token + active-timing + outcome projections read for one row. */
@@ -395,47 +425,110 @@ export function apply(ctx: Context): void {
     stopReason?: string
   }
 
-  /** Short TTL cache over the persistence metadata listing. */
+  /** Short TTL cache over the durable session-header listing. */
   let headersCache: { at: number; headers: Map<string, SessionHeader> } | undefined
 
-  const persistedHeaders = async (): Promise<Map<string, SessionHeader>> => {
+  /**
+   * Durable session headers, from the query engine's live-preferred corpus
+   * (`ctx.sessionQuery.listSessions`). The cache's `cachedSnapshot` needs the
+   * caller's header as the identity witness for the stored row, so a cold id
+   * is unreadable without it. Fail-soft: no query service or a throwing
+   * listing degrades every cold row to no projection values, never to a
+   * failed route.
+   */
+  const durableHeaders = async (): Promise<Map<string, SessionHeader>> => {
     const now = Date.now()
     if (headersCache !== undefined && now - headersCache.at < 5000) return headersCache.headers
     const headers = new Map<string, SessionHeader>()
+    const query = ctx.get('sessionQuery')
     try {
-      const persistence = ctx.get('sessionPersistence') as PersistenceListFace | undefined
-      if (persistence !== undefined) {
-        for (const header of await persistence.list()) {
-          headers.set(asString(header.id), header)
+      if (query !== undefined) {
+        for (const record of await query.listSessions()) {
+          headers.set(asString(record.header.id), record.header)
         }
       }
-    } catch {
-      // fail-soft: cold rows degrade to no projection values
+    } catch (error) {
+      ctx.logger.warn(`subagent-view: durable session listing failed: ${String(error)}`)
     }
     headersCache = { at: now, headers }
     return headers
   }
 
   /**
-   * One-time cold-outcome recovery promises, keyed by session id, so the
-   * sidebar and tab endpoints share each full-log refold. Failures are not
-   * memoized, so the next poll retries.
+   * The exact fork-inherited prefix length of one stored session. A header
+   * records only *whether* a session was seeded (`isSeeded`), so an unseeded
+   * session is exactly 0 and a seeded one costs one log read
+   * (`SessionLogSnapshot.inheritedEventCount`). Returns undefined only when a
+   * seeded session's log cannot be read — the caller then skips that
+   * candidate's projection values, which is what `isSeeded` being a boolean
+   * rather than a length forces.
    */
-  const coldRecoveries = new Map<string, Promise<Record<string, unknown> | undefined>>()
-
-  const recoverCold = (id: string, cache: ProjectionCacheFace): Promise<Record<string, unknown> | undefined> => {
-    let promise = coldRecoveries.get(id)
-    if (promise === undefined) {
-      promise = cache.coldSnapshot(id)
-        .then(snapshot => snapshot.values)
-        .catch(() => {
-          coldRecoveries.delete(id)
-          return undefined
-        })
-      coldRecoveries.set(id, promise)
+  const inheritedEventCountOf = async (header: SessionHeader): Promise<SessionLogOffset | undefined> => {
+    if (!header.isSeeded) return SessionLogOffset(0)
+    let snapshot: SessionLogSnapshot
+    try {
+      snapshot = await ctx.sessionQuery.readSession(header.id)
+    } catch (error) {
+      ctx.logger.warn(
+        `subagent-view: log read failed for seeded session ${asString(header.id)}: ${String(error)}`,
+      )
+      return undefined
     }
-    return promise
+    return snapshot.inheritedEventCount
   }
+
+  /**
+   * One-time cold full-log refolds, keyed by session id, so the sidebar and
+   * tab endpoints share each refold and its durable write-back side effect.
+   * An entry is dropped when the refold fails, so the next poll retries. The
+   * map is bounded and oldest-first, so a process that has seen thousands of
+   * finished sessions cannot accumulate refolds for ever.
+   */
+  const coldRefolds = new Map<string, Promise<Record<string, unknown>>>()
+  const MAX_COLD_REFOLDS = 512
+
+  const coldValues = (meta: SessionHeader, inheritedEventCount: SessionLogOffset, events: readonly SessionEvent[]): Promise<Record<string, unknown>> => {
+    const id = asString(meta.id)
+    let refold = coldRefolds.get(id)
+    if (refold === undefined) {
+      refold = (async (): Promise<Record<string, unknown>> => {
+        try {
+          // Synchronous, and it writes the refreshed checkpoint back
+          // (fail-soft, fire-and-forget) — hence one memoized call per session.
+          return ctx.sessionProjectionCache.coldSnapshot(meta, inheritedEventCount, events).values as unknown as Record<string, unknown>
+        } catch (error) {
+          coldRefolds.delete(id)
+          ctx.logger.warn(`subagent-view: cold projection refold failed for ${id}: ${String(error)}`)
+          return {}
+        }
+      })()
+      coldRefolds.set(id, refold)
+      if (coldRefolds.size > MAX_COLD_REFOLDS) {
+        const oldest = coldRefolds.keys().next()
+        if (oldest.done !== true) coldRefolds.delete(oldest.value)
+      }
+    }
+    return refold
+  }
+
+  /**
+   * Wire keys this plugin consumes. Passing them to `snapshot` keeps every
+   * other registered unit's `viewSchema.parse` out of our route (DSH
+   * 0.1.2-rc.1 registers 24+ units deployment-wide; one rejecting unit used to
+   * kill `/api/subagent-view/snapshot` with a body-less HTTP 400 —
+   * docs/DIAGNOSIS-0.1.2-rc.1.md, S1).
+   *
+   * `ProjectionsFor` below is the readable contract for what this plugin reads.
+   * The list is a plain `string[]` rather than a typed key tuple on purpose:
+   * `SessionProjectionMap` is widened by declaration merging from the hosting
+   * deployment's package set, so typing the tuple here would couple this
+   * plugin's compile to platform packages it does not depend on. The single
+   * cast at the read site is the price of that decoupling.
+   */
+  const WIRE_KEYS = ['tokenUsage', 'subagentTiming', 'subagentOutcome']
+
+  /** The narrowed `keys` parameter of `snapshot`/`cachedSnapshot`; see `WIRE_KEYS`. */
+  const wireKeys = (): readonly never[] => WIRE_KEYS as unknown as readonly never[]
 
   /**
    * Resolve each session's projection values, live or cold. Live children cut
@@ -443,36 +536,120 @@ export function apply(ctx: Context): void {
    * cache's stored rows (zero log load), with a one-time `coldSnapshot` full
    * refold when the durable outcome row is missing (e.g. a session that went
    * cold before this plugin's unit existed).
+   *
+   * The live read is fail-soft in three steps: the keyed snapshot, then the
+   * already-materialized cells only (no history refold), then no values at all.
+   * Projection values are decoration — token counts, timings, the durable
+   * outcome — so losing them must never take the route with it.
+   *
+   * Each step is guarded because DSH 0.1.2-rc.1's `snapshot()` still folds
+   * every registered unit via `materializeCells` and parses every wire view:
+   * an unrelated unit of the deployment can therefore reject our read, which
+   * must degrade this row rather than reject the whole HTTP response.
    */
+  const liveValues = (live: Session): Record<string, unknown> => {
+    try {
+      return ctx.sessionProjections.snapshot(live, wireKeys()).values as unknown as Record<string, unknown>
+    } catch (error) {
+      ctx.logger.warn(
+        `subagent-view: live projection snapshot failed for ${asString(live.id)}: ${String(error)}`,
+      )
+    }
+    try {
+      return (ctx.sessionProjections.cachedSnapshot(live, wireKeys())?.values ?? {}) as unknown as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * One cold candidate's projection values, fail-soft at every step.
+   *
+   * The durable row is bound to an exact `(header, inheritedEventCount)`
+   * identity, so the second argument is load-bearing: a missing one makes
+   * `cachedSnapshot` throw (`SessionLogOffset` brands it). The stored row is
+   * preferred (zero log load); a session with no stored row — or one whose row
+   * predates this plugin's `subagentOutcome` unit — is refolded once from its
+   * complete log through `coldSnapshot`, which also writes the refreshed
+   * checkpoint back so later polls take the cheap path.
+   *
+   * Never throws: a candidate whose log is unreadable, whose header is absent,
+   * or whose fold rejects simply contributes no values. Projection values are
+   * decoration, and one undecorated row must never cost the row list.
+   */
+  const coldValuesFor = async (
+    id: string,
+    header: SessionHeader,
+    loaded: Map<string, SessionLogSnapshot | undefined>,
+  ): Promise<Record<string, unknown> | undefined> => {
+    const inheritedEventCount = await inheritedEventCountOf(header)
+    if (inheritedEventCount === undefined) return undefined
+    try {
+      const cached = ctx.sessionProjectionCache.cachedSnapshot(header, inheritedEventCount, wireKeys())
+      if (cached !== undefined) return cached.values as unknown as Record<string, unknown>
+    } catch (error) {
+      ctx.logger.warn(`subagent-view: durable projection row unreadable for ${id}: ${String(error)}`)
+      return undefined
+    }
+    const log = await coldLog(id, loaded)
+    if (log === undefined) return undefined
+    return coldValues(log.session, log.inheritedEventCount, log.events)
+  }
+
+  /**
+   * One cold candidate's complete log, read at most once per poll: the sidebar
+   * and tab endpoints call `resolveValues` separately, and the memo makes them
+   * share the read within one request instead of decompressing the same log
+   * twice.
+   */
+  const coldLog = async (
+    id: string,
+    loaded: Map<string, SessionLogSnapshot | undefined>,
+  ): Promise<SessionLogSnapshot | undefined> => {
+    if (loaded.has(id)) return loaded.get(id)
+    let snapshot: SessionLogSnapshot | undefined
+    try {
+      snapshot = await ctx.sessionQuery.readSession(id as SessionId)
+    } catch (error) {
+      ctx.logger.warn(`subagent-view: cold log read failed for ${id}: ${String(error)}`)
+    }
+    loaded.set(id, snapshot)
+    return snapshot
+  }
+
   const resolveValues = async (ids: readonly string[]): Promise<Map<string, Record<string, unknown> | undefined>> => {
     const out = new Map<string, Record<string, unknown> | undefined>()
     const coldIds: string[] = []
     for (const id of ids) {
       const live = ctx.sessions.get(id as SessionId)
       if (live !== undefined) {
-        out.set(id, ctx.sessionProjections.snapshot(live).values as unknown as Record<string, unknown>)
+        out.set(id, liveValues(live))
       } else {
         coldIds.push(id)
       }
     }
     if (coldIds.length === 0) return out
 
-    const cache = ctx.get('sessionProjectionCache') as ProjectionCacheFace | undefined
-    const headers = cache === undefined ? new Map<string, SessionHeader>() : await persistedHeaders()
+    const cache = ctx.get('sessionProjectionCache')
+    const query = ctx.get('sessionQuery')
+    if (cache === undefined || query === undefined) {
+      for (const id of coldIds) out.set(id, undefined)
+      return out
+    }
+    const headers = await durableHeaders()
+    const loaded = new Map<string, SessionLogSnapshot | undefined>()
     for (const id of coldIds) {
       const header = headers.get(id)
-      if (header === undefined || cache === undefined) {
+      if (header === undefined) {
         out.set(id, undefined)
         continue
       }
-      const cached = cache.cachedSnapshot(header)
-      const cachedValues = cached?.values
-      if (cachedValues !== undefined && (cachedValues as { subagentOutcome?: unknown }).subagentOutcome !== undefined) {
-        out.set(id, cachedValues)
-        continue
+      try {
+        out.set(id, await coldValuesFor(id, header, loaded))
+      } catch (error) {
+        ctx.logger.warn(`subagent-view: cold read failed for ${id}: ${String(error)}`)
+        out.set(id, undefined)
       }
-      const recovered = await recoverCold(id, cache)
-      out.set(id, recovered ?? cachedValues)
     }
     return out
   }
@@ -676,23 +853,52 @@ export function apply(ctx: Context): void {
     }
   }
 
+  /**
+   * The `sessionId` query parameter, or null when it is absent. `get` returns
+   * null only for an absent param; an empty `?sessionId=` is a real (empty)
+   * session id.
+   */
+  const sessionIdOf = (req: IncomingMessage): string | null =>
+    new URL(req.url ?? '/', 'http://localhost').searchParams.get('sessionId')
+
+  /** Failure diagnostic for a degraded payload. */
+  const errorText = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error)
+
+  /**
+   * Answer one JSON payload. Both routes go through here so a future platform
+   * drift can never again surface as the body-less HTTP 400 that
+   * `dsh-host-webserver` produces for an uncaught handler exception: the
+   * plugin's client halves treat an unparseable body as a transient network
+   * failure and would silently render their empty state for ever
+   * (docs/DIAGNOSIS-0.1.2-rc.1.md §5).
+   */
+  const replyJson = (res: ServerResponse, payload: unknown): void => {
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+    })
+    res.end(JSON.stringify(payload))
+  }
+
   ctx.effect(() => {
     return ctx.webServer.register({
       kind: 'exact',
       path: '/api/subagent-view/snapshot',
       handler: async (req: IncomingMessage, res: ServerResponse) => {
-        const url = new URL(req.url ?? '/', 'http://localhost')
-        // `get` returns null only when the param is absent; an empty
-        // `?sessionId=` is treated as a real (empty) session id.
-        const sessionId = url.searchParams.get('sessionId')
-        const payload = sessionId === null
-          ? { now: Date.now(), rows: [] }
-          : { sessionId, now: Date.now(), rows: await enrich(sessionId) }
-        res.writeHead(200, {
-          'content-type': 'application/json',
-          'cache-control': 'no-store',
-        })
-        res.end(JSON.stringify(payload))
+        const sessionId = sessionIdOf(req)
+        if (sessionId === null) {
+          replyJson(res, { now: Date.now(), rows: [] } satisfies SnapshotPayload)
+          return
+        }
+        let payload: SnapshotPayload
+        try {
+          payload = { sessionId, now: Date.now(), rows: await enrich(sessionId) }
+        } catch (error) {
+          ctx.logger.warn(`subagent-view: snapshot failed for ${sessionId}: ${String(error)}`)
+          payload = { sessionId, now: Date.now(), rows: [], error: errorText(error) }
+        }
+        replyJson(res, payload)
       },
     })
   }, 'subagent-view: snapshot route')
@@ -702,16 +908,25 @@ export function apply(ctx: Context): void {
       kind: 'exact',
       path: '/api/subagent-view/tab',
       handler: async (req: IncomingMessage, res: ServerResponse) => {
-        const url = new URL(req.url ?? '/', 'http://localhost')
-        const sessionId = url.searchParams.get('sessionId')
-        const payload = sessionId === null
-          ? { currentId: '', now: Date.now(), ancestors: [], rows: [] }
-          : await tabFor(sessionId)
-        res.writeHead(200, {
-          'content-type': 'application/json',
-          'cache-control': 'no-store',
-        })
-        res.end(JSON.stringify(payload))
+        const sessionId = sessionIdOf(req)
+        if (sessionId === null) {
+          replyJson(res, { currentId: '', now: Date.now(), ancestors: [], rows: [] } satisfies TabPayload)
+          return
+        }
+        let payload: TabPayload
+        try {
+          payload = await tabFor(sessionId)
+        } catch (error) {
+          ctx.logger.warn(`subagent-view: tab failed for ${sessionId}: ${String(error)}`)
+          payload = {
+            currentId: sessionId,
+            now: Date.now(),
+            ancestors: [],
+            rows: [],
+            error: errorText(error),
+          }
+        }
+        replyJson(res, payload)
       },
     })
   }, 'subagent-view: tab route')

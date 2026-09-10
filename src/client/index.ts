@@ -4,7 +4,19 @@
  * panel live in ./panel.tsx, registered into the `sidebar.footer.action`
  * seat at the bottom of the left sidebar.
  */
-import type { ClientContext, SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
+// The browser half's type homes under DSH 0.1.2-rc.1: the client context is
+// `@deepseek-ai/cordis`, while `SessionId` and `SubagentAddress` are reached
+// through the session/subagent packages the client controllers re-export them
+// from. (`@deepseek-ai/dsh-client-runtime` is not published beyond 0.1.1-rc.2,
+// so a require of it would resolve to nothing in the module table.)
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+// Slot-contract merges: `ui-renderer` declares `ctx.slots`, `ui-session` adds
+// the standard session kit (`sessionId`, `useSessions`) that every
+// session-scope slot component receives. Both are type-only.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { SubagentViewBarPanel, setSessionsService, type MonitorSessionsService } from './panel'
 import { SubagentsView } from './subagents-tab'
 
@@ -490,7 +502,9 @@ export function apply(ctx: ClientContext): void {
   )
 
   // The client sessions service is typed as the host-side `SessionStore` here;
-  // cast to the narrow face panel.tsx already captures (open/openSubagent).
+  // cast to the narrow face the tab consumes: the breadcrumb's `open` plus the
+  // row action's `openSubagent` (both address a session the same way the
+  // sidebar panel does).
   const sessions = ctx.sessions as unknown as MonitorSessionsService
   ctx.slots.inject(
     'conversation.view',

@@ -30,7 +30,9 @@ panel, so nothing ever covers the conversation.
   marking parent-child relationships — the same visual the built-in subagent catalog uses.
   The sidebar panel starts with every branch collapsed; the conversation Subagents tab starts
   fully expanded. Both keep their expansion state across the 1s polls.
-- **Open conversation.** A button on each row opens that subagent's conversation in the main view.
+- **Open conversation.** A button on each row opens that subagent's conversation in the main view,
+  in both the sidebar panel and the Subagents tab (rows without a durable mode, and the row for the
+  conversation you are already in, have no address and no button).
 - **Back to main session.** One click returns from a subagent conversation to the root session.
 - **Clear finished.** Hides every fully-finished subtree (any branch that still contains a
   running subagent stays visible) from the list and the bar counts until the next change.
@@ -82,39 +84,83 @@ cp package.json package.json.bak-sv && cp pnpm-lock.yaml lock.bak-sv
 Profile files live outside this repo and require an unsandboxed shell (sandboxed agents see the
 profile mounted read-only).
 
-After the first install, client-side rebuilds hot-apply: run `pnpm build` in this repo and the
-open page updates within about a second (no restart). Host-side changes require one `dsh web`
-restart.
+### Propagating a rebuild (the install is a copy)
+
+A `file:` profile install is a **copy** of this package, not a symlink: after the first install the
+profile holds its own `lib/index.js` and `lib/client.js`, so a rebuild in this repo never reaches
+the running server on its own. Every change needs both of these:
+
+```bash
+# 1. put the rebuilt halves where the server actually reads them
+dsh plugin --profile web add "file:<repo>"     # reinstall the profile package
+# ...or, for a client-only tweak on an already-correct package.json:
+#   cp lib/client.js lib/client.js.map <profile-dir>/node_modules/subagent-view/lib/
+
+# 2. restart the web server (required for the HOST half)
+#    stop the process serving 127.0.0.1:3080, then:
+dsh web --host 127.0.0.1 --port 3080
+```
+
+The restart is not optional for the host half: the plugin's node module is imported once at boot,
+and `dsh-client-modules` additionally caches each package's `dsh.client` metadata per process
+(`reconcilePackage` returns early while the package source is unchanged), so a changed
+`dsh.client.inject` list is only re-read at boot. Until the profile copy is refreshed **and** the
+server restarted, the running server keeps serving the previous `lib/` — a rebuilt repo alone
+changes nothing on the wire.
 
 ### Verify (no browser needed)
 
+On an auth-protected deployment the three surfaces answer differently, so read the codes literally:
+
+| Request | Unauthenticated answer | Meaning |
+| --- | --- | --- |
+| `/` | `401` | the HTML shell is auth-gated |
+| `/plugins/<id>/client.js` | `404` | the bundle route is auth-gated as well, and it answers **404** rather than 401 when the request is not authorized — a 404 here is not proof that a bundle is missing |
+| `/api/subagent-view/*` | `200` | the plugin routes are genuinely unauthenticated |
+
+To exercise the two gated checks, either send a session cookie (`curl -b cookies.txt …`) or point
+them at an auth-disabled deployment.
+
 ```bash
-# graph row present (also proves the boot protocol):
+# graph row present (also proves the boot protocol); add -b cookies.txt on an
+# auth-protected deployment, where this otherwise answers 401:
 curl -s http://127.0.0.1:3080/ | grep -o '{"id":"subagent-view"[^}]*}'
 
-# client bundle served with the module-loader wrapper:
+# client bundle served with the module-loader wrapper; 404 here means
+# "not authorized" on an auth-protected deployment, not "missing bundle":
 curl -s -o /dev/null -w '%{http_code} %{content_type}\n' http://127.0.0.1:3080/plugins/subagent-view/client.js
 curl -s 'http://127.0.0.1:3080/plugins/subagent-view/client.js?rev=0' | head -c 120
 
-# snapshot endpoint, canonical wire contract:
+# snapshot endpoint, canonical wire contract (always 200 with a JSON body):
 curl -s 'http://127.0.0.1:3080/api/subagent-view/snapshot?sessionId=test-abc'
 # → {"sessionId":"test-abc","now":<ms>,"rows":[...]}
 curl -s 'http://127.0.0.1:3080/api/subagent-view/snapshot'
 # → {"now":<ms>,"rows":[]}   (sessionId key omitted when the param is absent)
+
+# tab endpoint, same contract:
+curl -s 'http://127.0.0.1:3080/api/subagent-view/tab?sessionId=<session-id>'
+# → {"currentId":"<session-id>","rootId":"...","now":<ms>,"ancestors":[...],"rows":[...]}
+
+# both routes against a session that has a live subagent must answer 200, not 400
+for s in <session-id-with-running-subagents>; do
+  printf 'snapshot=%s tab=%s\n' \
+    "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3080/api/subagent-view/snapshot?sessionId=$s")" \
+    "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3080/api/subagent-view/tab?sessionId=$s")"
+done
 ```
 
-### Coexistence with the reference plugin (only when it is enabled)
+Neither route is allowed to answer anything but `200` with a JSON body: a non-JSON answer used to
+mean "an uncaught handler error" (the web server maps those to an empty-body `400`), which the
+browser halves could not tell apart from a network blip. When the host degrades, it still answers
+`200` and adds an `error` string to the payload.
 
-The reference `@leetoners/dsh-ui-subagent-monitor` may stay installed next to this plugin. These
-two checks only apply when its fiber is ENABLED in the profile — this development environment
-deliberately disables it (profile `cordis.patch.yml`: `- id: ui-subagent-monitor / disabled: true`),
-so there the row is absent and the route answers 404 by design:
+### Coexistence with the reference plugin
 
-```bash
-curl -s http://127.0.0.1:3080/ | grep -o '{"id":"@leetoners/dsh-ui-subagent-monitor"[^}]*}'
-curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:3080/api/subagent-monitor/snapshot?sessionId=test-abc'
-# → 200 when enabled
-```
+The plugin is self-contained: it registers its own routes under `/api/subagent-view/*` and its own
+slot entries, and it never imports, disables or depends on any other subagent UI. If a deployment
+also runs the reference `@leetoners/dsh-ui-subagent-monitor`, both surfaces render independently;
+check that plugin's own README for its route and bundle ids. Whether the two appear together in a
+given profile is that profile's composition, not something this package decides or documents.
 
 ## Status legend
 
@@ -142,7 +188,12 @@ pnpm typecheck   # tsc --noEmit against the DSH platform types
 
 The build replicates the DSH monorepo client-bundle preset: the browser half is a classic script
 that registers a factory with `window.__ModuleLoader__.load({ id, factory })`; the only runtime
-externals are platform seed words (`react`, `react/jsx-runtime`).
+externals are the ids the loaded plugin set provides plus the ids the browser seed table answers
+(`react`, `react/jsx-runtime`, `@deepseek-ai/dsh-client-ui-primitives`). Everything else is
+bundled, so no `require` can resolve to nothing. `dsh.client.inject` lists the ids whose module
+rows must be loaded before this one; an id that is not part of the loaded graph is ignored, which
+is why the plugin also imports (type-only) the packages that carry the slot-contract augmentations
+it relies on.
 
 ## FAQ
 
@@ -155,9 +206,10 @@ in the current session and the 1-second poll will pick it up.
 **Why is the panel collapsed on my phone?** By design: on viewports ≤ 768px the panel defaults
 to collapsed so the conversation keeps its space. The bar remains visible and clickable.
 
-**Why does the plugin need a `dsh web` restart after install?** The client module system caches
-per-package metadata at boot; a plugin-set change only takes effect on restart. Later
-client-only rebuilds hot-reload without a restart.
+**Why does a rebuild need a reinstall *and* a `dsh web` restart?** A `file:` install copies the
+package into the profile, so a rebuild in this repo does not reach the profile's own `lib/`; and
+the client module system caches per-package metadata (including `dsh.client.inject`) per process,
+and the host half is imported once at boot. See [Propagating a rebuild](#propagating-a-rebuild-the-install-is-a-copy).
 
 **Does it keep history forever?** The host keeps at most 200 rows per root session, evicting
 the oldest finished rows first.

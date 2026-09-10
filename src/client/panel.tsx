@@ -10,8 +10,13 @@ import {
   useEffect, useMemo, useSyncExternalStore,
   type ReactElement,
 } from 'react'
-import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Session-scope standard kit for slot components: adds `useSessions` to the
+// global seat this entry reads its current session from (type-only).
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { ArchivedFolder, splitArchived, SubagentTree, type TreeRowContext } from './tree'
@@ -37,6 +42,8 @@ interface SnapshotPayload {
   sessionId?: string
   now?: number
   rows?: MonitorRow[]
+  /** Host-side diagnostic when the route degraded; the payload is still valid. */
+  error?: string
 }
 
 // ---- page-local store (one instance per page) ----
@@ -83,9 +90,15 @@ async function refresh(sessionId: string): Promise<void> {
     const res = await fetch(`/api/subagent-view/snapshot?sessionId=${encodeURIComponent(sessionId)}`)
     const data = await res.json() as SnapshotPayload
     if (data.sessionId !== state.sessionId) return
+    if (data.error !== undefined) console.warn('subagent-view: snapshot degraded:', data.error)
     commit({ rows: data.rows ?? [], now: data.now ?? Date.now() })
-  } catch {
-    // Transient network failure: the next tick retries.
+  } catch (error) {
+    // The host half answers 200 with a well-formed payload for every input
+    // (including its own failures), so a throw here is a transport problem and
+    // the next tick retries. Log it rather than swallowing it silently: an
+    // invisible failure is exactly what turned a host-side crash into "the
+    // panel just loses rows" on the DSH 0.1.2-rc.1 upgrade.
+    console.warn('subagent-view: snapshot poll failed', error)
   }
 }
 
@@ -204,8 +217,8 @@ type BarPanelProps = PropsRuntime<'sidebar.footer.action'> & {
 export function SubagentViewBarPanel(props: BarPanelProps): ReactElement {
   const { wide, toggleSidebar } = props
   const monitor = useMonitor()
-  const current = props.useSessions(select => select.current)
-  const subagentParent = props.useSessions(select => (
+  const current = props.useSessions((select: SessionListState) => select.current)
+  const subagentParent = props.useSessions((select: SessionListState) => (
     select.currentAddress === undefined ? undefined : select.currentAddress.parentSessionId
   ))
 

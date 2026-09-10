@@ -18,7 +18,11 @@ import {
 } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client' // adds 'conversation.view' to SlotMap
-import type { SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
+// Type homes under DSH 0.1.2-rc.1, matching src/client/index.ts: the session
+// and subagent packages the client controllers re-export them from.
+// (`@deepseek-ai/dsh-client-runtime` is not published beyond 0.1.1-rc.2.)
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import { ArchivedFolder, splitArchived, SubagentTree, type TreeRowContext } from './tree'
 
 // ---- wire shape shared with the node half ----
@@ -287,12 +291,14 @@ function rawFields(row: TabRow): [string, string][] {
 // ---- component ----
 
 type TabProps = PropsRuntime<'conversation.view'> & {
+  /** Open any session in the main view (the breadcrumb's back-navigation). */
   open(id: SessionId): void
+  /** Open a direct child's own conversation, addressed by parent, child and mode. */
   openSubagent(address: SubagentAddress): void
 }
 
 export function SubagentsView(props: TabProps): ReactElement {
-  const { sessionId, open } = props
+  const { sessionId, open, openSubagent } = props
   const tab = useTab()
 
   // Track the current session; the first poll of a new session pulls the
@@ -350,6 +356,19 @@ export function SubagentsView(props: TabProps): ReactElement {
     setCollapsed(prev => toggleMember(prev, id))
   }
 
+  // Direct children are addressable by parent + child + mode, which is what the
+  // `conversation.view` inject hands over. Rows without a durable mode (an
+  // event-only straggler) and the row for the conversation you are already in
+  // have no address, so they get no action.
+  const openChild = (row: TabRow): void => {
+    if (row.isCurrent || row.mode === undefined || row.mode === '') return
+    openSubagent({
+      parentSessionId: sessionId,
+      childSessionId: row.id as SessionId,
+      mode: row.mode === 'continuable' ? 'continuable' : 'one-shot',
+    })
+  }
+
   const { ancestors, rows, now } = tab
   const running = rows.filter(row => row.status === 'running').length
   const done = rows.filter(row => row.status === 'completed').length
@@ -392,6 +411,18 @@ export function SubagentsView(props: TabProps): ReactElement {
               : null}
           </span>
           <span className="sat-row-actions">
+            {row.isCurrent || row.mode === undefined || row.mode === ''
+              ? null
+              : (
+                <button
+                  className="sat-row-btn"
+                  type="button"
+                  title="Open this subagent's conversation"
+                  onClick={() => openChild(row)}
+                >
+                  ↗
+                </button>
+                )}
             <button
               className="sat-row-btn"
               type="button"
