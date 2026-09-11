@@ -25,16 +25,17 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Loads the Context augmentation that provides `ctx.sessionProjections`.
 import type {} from '@deepseek-ai/dsh-session-projection'
-// Loads the Context augmentations that provide the cold-read services
-// `ctx.sessionProjectionCache` and `ctx.sessionQuery`. Both are read through
-// `ctx.get`, so the plugins that provide them stay optional.
+// Loads the Context augmentations for the cold-read services
+// `ctx.sessionProjectionCache` and `ctx.sessionQuery`. Both are resolved with
+// `ctx.get` (never the property accessor, which throws without `inject`), so
+// the plugins that provide them stay optional.
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
-// The cold log read goes through `ctx.sessionQuery` (which serves live and
-// persisted sessions alike), so the persistence backend itself is never called
-// directly. The import keeps the declared peer surface honest: a deployment
-// that composes `sessionQuery` over persistence is exactly what this cold path
-// requires, and the augmentation proves the service name this plugin's
-// `durableHeaders` comment refers to.
+// The cold log read goes through the `sessionQuery` service (which serves live
+// and persisted sessions alike), so the persistence backend itself is never
+// called directly. The import keeps the declared peer surface honest: a
+// deployment that composes `sessionQuery` over persistence is exactly what this
+// cold path requires, and the augmentation proves the service name this
+// plugin's `durableHeaders` comment refers to.
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 
@@ -425,14 +426,57 @@ export function apply(ctx: Context): void {
     stopReason?: string
   }
 
+  /** Minimal face of the optional session query service (`ctx.get('sessionQuery')`). */
+  interface SessionQueryFace {
+    listSessions(): Promise<readonly { header: SessionHeader }[]>
+    readSession(id: SessionId): Promise<SessionLogSnapshot>
+  }
+
+  /** Minimal face of the optional durable projection cache. */
+  interface ProjectionCacheFace {
+    cachedSnapshot(
+      meta: SessionHeader,
+      inheritedEventCount: SessionLogOffset,
+      keys?: readonly never[],
+    ): { values: Record<string, unknown> } | undefined
+    coldSnapshot(
+      meta: SessionHeader,
+      inheritedEventCount: SessionLogOffset,
+      events: readonly SessionEvent[],
+    ): { values: Record<string, unknown> }
+  }
+
+  /**
+   * The two OPTIONAL cold-read services, always resolved through `ctx.get()`.
+   *
+   * They are deliberately NOT declared in `inject`: injecting a service makes
+   * the plugin wait for it, and this plugin must keep serving live rows in a
+   * deployment that has no projection cache. `ctx.get(name)` reads a service
+   * WITHOUT that requirement.
+   *
+   * The accessor form is the trap: in cordis 4.0.2 (DSH 0.1.2-rc.1) reading
+   * `ctx.sessionQuery` as a PROPERTY throws
+   * `cannot get property "sessionQuery" without inject`. Every such throw was
+   * swallowed by a fail-soft `catch`, so each cold row silently lost ALL of its
+   * projection values at once — terminal status, token totals and settled/active
+   * timing — which read as "finished runs vanish", "the Archived folder never
+   * appears" and "tokens/active time are gone".
+   */
+  const coldQuery = (): SessionQueryFace | undefined =>
+    ctx.get('sessionQuery') as SessionQueryFace | undefined
+
+  /** The durable projection cache, resolved without `inject`; see `coldQuery`. */
+  const coldCache = (): ProjectionCacheFace | undefined =>
+    ctx.get('sessionProjectionCache') as ProjectionCacheFace | undefined
+
   /** Short TTL cache over the durable session-header listing. */
   let headersCache: { at: number; headers: Map<string, SessionHeader> } | undefined
 
   /**
    * Durable session headers, from the query engine's live-preferred corpus
-   * (`ctx.sessionQuery.listSessions`). The cache's `cachedSnapshot` needs the
-   * caller's header as the identity witness for the stored row, so a cold id
-   * is unreadable without it. Fail-soft: no query service or a throwing
+   * (the `sessionQuery` service's `listSessions`). The cache's `cachedSnapshot`
+   * needs the caller's header as the identity witness for the stored row, so a
+   * cold id is unreadable without it. Fail-soft: no query service or a throwing
    * listing degrades every cold row to no projection values, never to a
    * failed route.
    */
@@ -440,7 +484,7 @@ export function apply(ctx: Context): void {
     const now = Date.now()
     if (headersCache !== undefined && now - headersCache.at < 5000) return headersCache.headers
     const headers = new Map<string, SessionHeader>()
-    const query = ctx.get('sessionQuery')
+    const query = coldQuery()
     try {
       if (query !== undefined) {
         for (const record of await query.listSessions()) {
@@ -465,9 +509,11 @@ export function apply(ctx: Context): void {
    */
   const inheritedEventCountOf = async (header: SessionHeader): Promise<SessionLogOffset | undefined> => {
     if (!header.isSeeded) return SessionLogOffset(0)
+    const query = coldQuery()
+    if (query === undefined) return undefined
     let snapshot: SessionLogSnapshot
     try {
-      snapshot = await ctx.sessionQuery.readSession(header.id)
+      snapshot = await query.readSession(header.id)
     } catch (error) {
       ctx.logger.warn(
         `subagent-view: log read failed for seeded session ${asString(header.id)}: ${String(error)}`,
@@ -495,7 +541,9 @@ export function apply(ctx: Context): void {
         try {
           // Synchronous, and it writes the refreshed checkpoint back
           // (fail-soft, fire-and-forget) — hence one memoized call per session.
-          return ctx.sessionProjectionCache.coldSnapshot(meta, inheritedEventCount, events).values as unknown as Record<string, unknown>
+          const cache = coldCache()
+          if (cache === undefined) return {}
+          return cache.coldSnapshot(meta, inheritedEventCount, events).values as unknown as Record<string, unknown>
         } catch (error) {
           coldRefolds.delete(id)
           ctx.logger.warn(`subagent-view: cold projection refold failed for ${id}: ${String(error)}`)
@@ -628,7 +676,9 @@ export function apply(ctx: Context): void {
      */
     const durable = (keys: readonly string[]): Record<string, unknown> | undefined => {
       try {
-        return ctx.sessionProjectionCache
+        const cache = coldCache()
+        if (cache === undefined) return undefined
+        return cache
           .cachedSnapshot(header, inheritedEventCount, keyList(keys))
           ?.values as unknown as Record<string, unknown> | undefined
       } catch (error) {
@@ -670,7 +720,8 @@ export function apply(ctx: Context): void {
     if (loaded.has(id)) return loaded.get(id)
     let snapshot: SessionLogSnapshot | undefined
     try {
-      snapshot = await ctx.sessionQuery.readSession(id as SessionId)
+      const query = coldQuery()
+      snapshot = query === undefined ? undefined : await query.readSession(id as SessionId)
     } catch (error) {
       ctx.logger.warn(`subagent-view: cold log read failed for ${id}: ${String(error)}`)
     }
@@ -691,8 +742,8 @@ export function apply(ctx: Context): void {
     }
     if (coldIds.length === 0) return out
 
-    const cache = ctx.get('sessionProjectionCache')
-    const query = ctx.get('sessionQuery')
+    const cache = coldCache()
+    const query = coldQuery()
     if (cache === undefined || query === undefined) {
       for (const id of coldIds) out.set(id, undefined)
       return out
