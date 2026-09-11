@@ -512,23 +512,47 @@ export function apply(ctx: Context): void {
   }
 
   /**
-   * Wire keys this plugin consumes. Passing them to `snapshot` keeps every
-   * other registered unit's `viewSchema.parse` out of our route (DSH
-   * 0.1.2-rc.1 registers 24+ units deployment-wide; one rejecting unit used to
-   * kill `/api/subagent-view/snapshot` with a body-less HTTP 400 —
-   * docs/DIAGNOSIS-0.1.2-rc.1.md, S1).
+   * The one projection key this plugin OWNS, and the only one that decides a
+   * row's terminal status — which in turn drives the Done count and the
+   * Archived folder. It is requested ON ITS OWN because
+   * `sessionProjections.viewCheckpoint` parses the view of every requested key
+   * and does not guard that parse (`dsh-session-projection/lib/index.js:259`),
+   * so a single rejecting unit throws the whole read. Isolating the outcome
+   * means a broken platform unit can no longer deny this plugin the one value
+   * that decides whether a finished subagent is reported as finished.
    *
    * `ProjectionsFor` below is the readable contract for what this plugin reads.
-   * The list is a plain `string[]` rather than a typed key tuple on purpose:
+   * The lists are plain `string[]` rather than typed key tuples on purpose:
    * `SessionProjectionMap` is widened by declaration merging from the hosting
-   * deployment's package set, so typing the tuple here would couple this
-   * plugin's compile to platform packages it does not depend on. The single
-   * cast at the read site is the price of that decoupling.
+   * deployment's package set, so typing them here would couple this plugin's
+   * compile to platform packages it does not depend on. The single cast at each
+   * read site is the price of that decoupling.
    */
-  const WIRE_KEYS = ['tokenUsage', 'subagentTiming', 'subagentOutcome']
+  const OUTCOME_KEYS = ['subagentOutcome']
 
-  /** The narrowed `keys` parameter of `snapshot`/`cachedSnapshot`; see `WIRE_KEYS`. */
-  const wireKeys = (): readonly never[] => WIRE_KEYS as unknown as readonly never[]
+  /**
+   * Decoration keys (token totals, settled/active timing), read as their own
+   * group so a rejecting unit here costs only the decoration and never the
+   * status.
+   */
+  const DECOR_KEYS = ['tokenUsage', 'subagentTiming']
+
+  /** The narrowed `keys` parameter of `snapshot`/`cachedSnapshot`; see above. */
+  const keyList = (keys: readonly string[]): readonly never[] => keys as unknown as readonly never[]
+
+  /** Merge projection groups left to right; an earlier key is never overwritten. */
+  const mergeValues = (
+    ...groups: readonly (Record<string, unknown> | undefined)[]
+  ): Record<string, unknown> => {
+    const merged: Record<string, unknown> = {}
+    for (const group of groups) {
+      if (group === undefined) continue
+      for (const [key, value] of Object.entries(group)) {
+        if (!(key in merged)) merged[key] = value
+      }
+    }
+    return merged
+  }
 
   /**
    * Resolve each session's projection values, live or cold. Live children cut
@@ -548,18 +572,28 @@ export function apply(ctx: Context): void {
    * must degrade this row rather than reject the whole HTTP response.
    */
   const liveValues = (live: Session): Record<string, unknown> => {
-    try {
-      return ctx.sessionProjections.snapshot(live, wireKeys()).values as unknown as Record<string, unknown>
-    } catch (error) {
-      ctx.logger.warn(
-        `subagent-view: live projection snapshot failed for ${asString(live.id)}: ${String(error)}`,
-      )
+    const id = asString(live.id)
+    /**
+     * One key group, fail-soft in three steps: the keyed snapshot, then the
+     * already-materialized cells only (no history refold), then nothing. Each
+     * group is read on its own so a rejecting platform unit degrades only
+     * itself — and never the outcome group that decides the status.
+     */
+    const read = (keys: readonly string[]): Record<string, unknown> | undefined => {
+      try {
+        return ctx.sessionProjections.snapshot(live, keyList(keys)).values as unknown as Record<string, unknown>
+      } catch (error) {
+        ctx.logger.warn(
+          `subagent-view: live projection snapshot failed for ${id} (${keys.join(',')}): ${String(error)}`,
+        )
+      }
+      try {
+        return (ctx.sessionProjections.cachedSnapshot(live, keyList(keys))?.values ?? {}) as unknown as Record<string, unknown>
+      } catch {
+        return undefined
+      }
     }
-    try {
-      return (ctx.sessionProjections.cachedSnapshot(live, wireKeys())?.values ?? {}) as unknown as Record<string, unknown>
-    } catch {
-      return {}
-    }
+    return mergeValues(read(OUTCOME_KEYS), read(DECOR_KEYS))
   }
 
   /**
@@ -584,16 +618,43 @@ export function apply(ctx: Context): void {
   ): Promise<Record<string, unknown> | undefined> => {
     const inheritedEventCount = await inheritedEventCountOf(header)
     if (inheritedEventCount === undefined) return undefined
-    try {
-      const cached = ctx.sessionProjectionCache.cachedSnapshot(header, inheritedEventCount, wireKeys())
-      if (cached !== undefined) return cached.values as unknown as Record<string, unknown>
-    } catch (error) {
-      ctx.logger.warn(`subagent-view: durable projection row unreadable for ${id}: ${String(error)}`)
-      return undefined
+
+    /**
+     * One key group from the durable row. A THROW is an expected outcome, not
+     * a dead end: `viewCheckpoint` leaves `wire.viewSchema.parse` unguarded, so
+     * one rejecting unit inside the requested group throws the whole call. The
+     * group is therefore isolated, and a throw falls through to the refold
+     * below instead of denying this row its values.
+     */
+    const durable = (keys: readonly string[]): Record<string, unknown> | undefined => {
+      try {
+        return ctx.sessionProjectionCache
+          .cachedSnapshot(header, inheritedEventCount, keyList(keys))
+          ?.values as unknown as Record<string, unknown> | undefined
+      } catch (error) {
+        ctx.logger.warn(
+          `subagent-view: durable projection row unreadable for ${id} (${keys.join(',')}): ${String(error)}`,
+        )
+        return undefined
+      }
     }
-    const log = await coldLog(id, loaded)
-    if (log === undefined) return undefined
-    return coldValues(log.session, log.inheritedEventCount, log.events)
+
+    let values = mergeValues(durable(OUTCOME_KEYS), durable(DECOR_KEYS))
+
+    // Recovery rung: refold from the complete log whenever the durable row
+    // could not serve a group (it threw, is absent, or predates our unit).
+    // `coldValues` memoizes the refold per session - and the refreshed
+    // checkpoint it writes back makes later polls take the cheap path - so this
+    // is paid at most once per session and never per poll.
+    if (values['subagentOutcome'] === undefined
+      || values['tokenUsage'] === undefined
+      || values['subagentTiming'] === undefined) {
+      const log = await coldLog(id, loaded)
+      if (log !== undefined) {
+        values = mergeValues(values, await coldValues(log.session, log.inheritedEventCount, log.events))
+      }
+    }
+    return values
   }
 
   /**
