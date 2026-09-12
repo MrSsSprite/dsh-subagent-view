@@ -266,6 +266,18 @@ also runs the reference `@leetoners/dsh-ui-subagent-monitor`, both surfaces rend
 check that plugin's own README for its route and bundle ids. Whether the two appear together in a
 given profile is that profile's composition, not something this package decides or documents.
 
+## Platform surfaces this plugin deliberately does not use
+
+`0.1.5-rc.2` ships more subagent machinery than this plugin consumes. These are **dispositions, not
+defects**: each is an unexplored opportunity or a deliberate non-adoption, recorded so the next
+reader does not have to re-derive it. Nothing here is known to be broken.
+
+| surface | what it is | disposition |
+| --- | --- | --- |
+| `subagentCatalog` | a `sessionProjections` projection registered by `dsh-subagent` (`lib/types/catalog.js:68`, `lib/types/index.js:129`): local child creation appends a `subagent/catalog` fact to the **parent** session, folded durably per parent with `inheritedEventCount` excluded from the count, exposed as `projections.values.subagentCatalog` | **Not used.** It is the one plausible *alternative data source* for this plugin's row list. The plugin keeps its own `subagentOutcome` projection instead (a different key — no registration collision) and derives rows from live `subagents.listDescendants()` plus `sessionQuery`/`sessionProjectionCache` replay for cold sessions. Adopting the catalog could remove the `sessionQuery` cold-path read and/or make cold rows exact, since it records the parent's own view of child creation rather than relying on observed descriptor/lifecycle facts. That is a follow-up feature, not a migration requirement |
+| `@deepseek-ai/dsh-client-ui-subagent` | the roster-composed core subagent UI (`dsh-web-app/cordis.patch.yml:297-298`), a graph row alongside this plugin | **Already accounted for.** It registers `conversation.composer` and `conversation.session.header.lineage` — **not** `conversation.view`, so the Subagents tab does not contend for this plugin's seat. It is the source of the row styling this plugin matches on purpose (see `src/client/index.ts:221`, `src/client/tree.tsx:5`) |
+| `sidebar.right.pane.tab.guide`, `…tab.menu.item`, `sidebar.panel-list`, `usePanelInfo` | rightbar/dockkit extension points that exist but are unused here | **Not adopted.** The guide capsule the platform already renders is the supported open path; adding our own guide or menu entry would duplicate it. `usePanelInfo` becomes relevant only if the plugin starts reading tab geometry (see the dockkit note in `docs/INTEGRATION-RECORD.md` §6 L4) |
+
 ## Status legend
 
 | Dot | Meaning | Counted as |
@@ -338,6 +350,7 @@ The shell's module table is the 9-word seed list documented in `tsdown.config.ts
 | [docs/REVIEW-RIGHTBAR.md](./docs/REVIEW-RIGHTBAR.md) | Contract and parity review (t5): the judged revision by hash, acceptance/requirement/parity tables, and the two low findings. |
 | [docs/DELIVERY-RECORD-0.1.5-rc.2.md](./docs/DELIVERY-RECORD-0.1.5-rc.2.md) | Audit record (t7) of the two captain-authorized corrections that produced the shipped revision: the guarded `ctx.inject(['sidebarRightTabs'], …)` form and the optional `sidebar-right` peer. |
 | [docs/INTEGRATION-RECORD.md](./docs/INTEGRATION-RECORD.md) | Final assembly (t6): delivered revisions, the recorded fresh-install reproduction, the packaging-metadata audit, the deployment steps that await explicit user confirmation, and residual limitations. |
+| [docs/ERRATA-0.1.5.md](./docs/ERRATA-0.1.5.md) | Corrections to claims in the `0.1.5` records that no longer match the tree or the installed platform — gathered by the read-only `0.1.5` migration audit. Read this before acting on any hash or deployment statement in the records above. |
 | [docs/DIAGNOSIS-0.1.2-rc.1.md](./docs/DIAGNOSIS-0.1.2-rc.1.md), [docs/FIX-0.1.2-rc.1.md](./docs/FIX-0.1.2-rc.1.md) | The previous round: why the plugin needed the `0.1.2-rc.1` migration and what was changed. |
 
 ## FAQ
