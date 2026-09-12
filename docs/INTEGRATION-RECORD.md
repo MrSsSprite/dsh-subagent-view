@@ -106,7 +106,8 @@ made were `description`, `keywords` and two `files[]` entries.
 | `cordis.patch.yml` | one `insert:` row `{id: subagent-view, name: 'subagent-view'}` | mounts the host half; semantics unchanged in `0.1.5-rc.2` (migration §2 H13 / change item 15); left untouched |
 | `peerDependencies` | all `@deepseek-ai/*` at `>=0.1.5-rc.2`, `cordis >=0.1.0` | records the platform the bundle is built and verified against |
 | `peerDependenciesMeta` | `@deepseek-ai/dsh-client-ui-sidebar-right` → `{optional: true}` | a profile that does not compose `ui-sidebar-right` must still install; the plugin then keeps surfaces 1–2 (verified R11.6) |
-| `dependencies` | `react ^18.2.0`, `zod ^4.4.3` | `react` is served by the browser seed table; `zod` is bundled into `lib/index.js` (tsdown reports it as the only bundled dependency) |
+| `dependencies` | `react ^18.2.0` | `react` is served by the browser seed table (the client bundle `require`s it, and every DSH web page has it) |
+| `devDependencies` | … , `zod ^4.4.3` | build-time only: tsdown inlines zod into `lib/index.js`, so the host half has **no** zod import at runtime — see §6 L5 and `docs/MIGRATION-0.1.5-rc.2.md` §7 R1. Moved here from `dependencies` by the 0.1.5 follow-up pass, which discharged R1/P0-2 |
 | `files[]` | `lib/index.js`, `lib/client.js`, **`lib/index.js.map`**, **`lib/client.js.map`**, `cordis.patch.yml`, `src`, `README.md`, `LICENSE`, `docs` | everything a profile install reads |
 
 **Why `files[]` is load-bearing (measured, not assumed).** A `file:` install is filtered by

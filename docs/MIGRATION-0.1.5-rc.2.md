@@ -495,7 +495,7 @@ Severity: **P0** = required for the plugin to load/behave on 0.1.5-rc.2 ·
 | # | Pri | Change | Target |
 |---|---|---|---|
 | 1 | P0 | Bump every pinned `@deepseek-ai/*` devDependency `0.1.2-rc.1 → 0.1.5-rc.2`; leave `@deepseek-ai/cordis` at `4.0.2` | `package.json:66-80` |
-| 2 | P0 | Resolve the zod question (R1): either confirm a single installed zod (both the plugin's `^4.4.3` and the platform's `^4.4.3` dedupe), or raise the plugin's dependency to `^4.6.2` so plugin and platform share one zod | `package.json:45` |
+| 2 | P0 | Resolve the zod question (R1): either confirm a single installed zod (both the plugin's `^4.4.3` and the platform's `^4.4.3` dedupe), or raise the plugin's dependency to `^4.6.2` so plugin and platform share one zod — **DONE (0.1.5 follow-up pass)**: neither branch was needed once the bundle was measured to inline zod and import nothing from it at runtime; `zod` moved from `dependencies` to `devDependencies`, which removes the two-copy install shape entirely. See §7 R1 | `package.json` `devDependencies` |
 | 3 | P0 | `dsh.client.inject`: remove `@deepseek-ai/dsh-client-ui-primitives`; add `@deepseek-ai/dsh-client-ui-sidebar-right`; add `@deepseek-ai/dsh-api-session-controller` (recommended) | `package.json:16-22` |
 | 4 | P0 | Keep `@deepseek-ai/dsh-client-ui-primitives` and `@deepseek-ai/dsh-client-ui-slots` as devDependencies: `tree.tsx:29-33` resolves icons through them at build time, and **other** platform packages' `.d.ts` resolve `slots`/`store` from the plugin's install | `package.json:69,73` |
 | 5 | P0 | Add devDependency `@deepseek-ai/dsh-client-ui-sidebar-right@0.1.5-rc.2` (types for the new registration) | `package.json:64-80` |
@@ -532,6 +532,16 @@ Settling experiment: after the devDependency bump run `pnpm install`, then
 `ls node_modules/.pnpm | grep -E '^zod@'` (expect exactly one version) and
 `pnpm typecheck`. If two versions appear, set `zod` to the platform's version
 (`^4.6.2`) and re-run.
+
+> **RESOLVED (0.1.5 follow-up pass).** The hypothesis was correct as a *static*-install hazard and is
+> now removed at the source rather than papered over. Measured: the repo installs exactly one zod
+> (`node_modules/.pnpm/zod@4.4.3`), the platform ships 4.6.2, and the host bundle contains **no**
+> runtime zod import — `lib/index.js` has exactly one external import
+> (`{ SessionLogOffset } from "@deepseek-ai/dsh-session"`) and inlines zod, so no zod object ever
+> crosses the plugin/platform boundary at runtime. `zod` therefore moved from `dependencies` to
+> `devDependencies`: it is build-time-only, and the two-copy install shape that produced TS2739 can
+> no longer arise from this package's manifest. `pnpm typecheck` exit 0 and the bundle hashes are
+> unchanged by the move.
 
 **R2 — pre-upgrade projection-cache rows are unusable as fold shortcuts.**
 HYPOTHESIS: because `checkpointIdentity` gained `formatVersion` and the domain
@@ -745,6 +755,13 @@ src/probe.ts(4,14): error TS2739: Type 'ZodObject<{ stopReason: ZodNullable<ZodS
 
 Plugin zod 4.4.3 schema → platform zod 4.6.2 `ZodType` = **incompatible**. Drives
 R1.
+
+> **Post-resolution note (0.1.5 follow-up pass).** This probe remains a true statement about the
+> *types* — and it is why the plugin's own build must typecheck against one zod — but it never
+> reached runtime: the shipped host bundle has no zod import at all (only
+> `@deepseek-ai/dsh-session`), so no zod schema object is ever handed to the platform's 4.6.2
+> copy. The probe is retained as the reason `zod` is a **build-time** dependency rather than a
+> runtime one; see R1's resolution above and `docs/INTEGRATION-RECORD.md` §3.
 
 ### 9.4 Module-table / require inventory
 

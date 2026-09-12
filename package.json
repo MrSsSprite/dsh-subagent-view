@@ -44,8 +44,7 @@
     "docs"
   ],
   "dependencies": {
-    "react": "^18.2.0",
-    "zod": "^4.4.3"
+    "react": "^18.2.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
@@ -95,7 +94,8 @@
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
     "tsdown": "^0.22.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "zod": "^4.4.3"
   },
   "keywords": [
     "dsh",
