@@ -46,9 +46,20 @@ const isHostExternal = (specifier: string): boolean =>
   || specifier.startsWith('@deepseek-ai/')
   || /^node:/.test(specifier)
 
+/**
+ * Browser-half externals. Note there is deliberately **no** rule for
+ * `@deepseek-ai/<pkg>/remote`: the module table only answers bare package ids
+ * (the boot-graph row key) and their `/client` alias, so a `<pkg>/remote`
+ * external would materialize as an unresolvable `require` and throw in the
+ * browser. Those subpaths do exist on disk — they are the generated typert
+ * remote-client descriptors (`lib/typert.remote-client.js`, e.g.
+ * `dsh-api-session-controller`, `dsh-client-file-upload`) — but no client
+ * bundle requires one, and bundling is the correct treatment should a future
+ * value import appear: it is a zod-carrying descriptor module, not a service
+ * the page provides.
+ */
 const clientExternal = (specifier: string): boolean =>
   CLIENT_EXTERNALS.includes(specifier)
-  || (specifier.startsWith('@deepseek-ai/') && specifier.endsWith('/remote'))
 
 export default [
   {
