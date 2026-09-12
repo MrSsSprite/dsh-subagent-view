@@ -81,23 +81,45 @@ Measured at the time of writing:
 | platform version split | CLI `@deepseek-ai/dsh@0.1.5-rc.1`; 230 bundled packages and the shell at `0.1.5-rc.2`; `cordis` 4.0.2 |
 | served platform symlinks | 244 under `~/.dsh/profiles/node_modules/@deepseek-ai/` (an earlier track reported 246; 244 is the measured value) |
 
-Whole-file hashes of the documents this pass touched, as of the commit that carries this file:
+Whole-file hashes of the documents this pass touched, **before** the pass (stable reference points;
+see the note below on why no "after" column is given):
 
-| document | before this pass | at this commit |
-|---|---|---|
-| `README.md` | `7afe4157…` | `3bed7772a2cf88ec84e24a470710db86d22a0395842144e2340d5acc7c73eaff` |
-| `docs/DELIVERY-RECORD-0.1.5-rc.2.md` | `4f679c87…` | `6ddcf0d052b037dbb73f2a68955f629949fcb9fa80f4fac0660a556514f956c3` |
-| `docs/REVIEW-RIGHTBAR.md` | `44650948…` | `ffd76322a790c8b5aaace5d47c79f2f713641155a994adf13489be74b3ab84d0` |
-| `docs/VERIFICATION-RIGHTBAR.md` | `d0c5a9f4…` | `fc0bd387e8fa6332a8aaa3623ed8d54f1b52c215f092fadaca25eed4bade35e5` |
-| `docs/INTEGRATION-RECORD.md` | `1c0dc8d5…` | `615179f3ca329d025d0fd7fba1a3f0632812808ffcf735a375cca0cc1c6a7892` |
-| `docs/MIGRATION-0.1.5-rc.2.md` | `77029ceb…` | changed by the zod-resolution commit (see git history) |
-| `.verify/PREP-NOTES.md`, `docs/DIAGNOSIS-0.1.2-rc.1.md`, `REVIEW.md` | error-pointer appends only (gitignored / historical) | — |
+| document | before this pass |
+|---|---|
+| `README.md` | `7afe415744e5cf43678475d56f56115f1b5f1fc987dd2536dcfad596db4038f8` |
+| `docs/DELIVERY-RECORD-0.1.5-rc.2.md` | `4f679c873b845629cf2ef04983e8432cc963f8ca62ef2b90e4f53952fc6b791d` |
+| `docs/REVIEW-RIGHTBAR.md` | `44650948edf88dbaba8dab0d8fc4149803dc6bf83884ea47db83789a4270aded` |
+| `docs/VERIFICATION-RIGHTBAR.md` | `d0c5a9f433685fbc57c51c16a3e4422143ea0d91ad7674926e408c5a33b4f8d6` |
+| `docs/MIGRATION-0.1.5-rc.2.md` | `77029ceba77c2db292e9b1aff5c4de4fb77d55ed78236afafc11a1bb5081ad4f` |
+| `docs/INTEGRATION-RECORD.md` | `ebdeb691f5dc58f7b25655a88ea1c192ce6499c88f7c79f4342935995fc6930d` |
+| `.verify/PREP-NOTES.md`, `docs/DIAGNOSIS-0.1.2-rc.1.md`, `REVIEW.md` | pointer appends only (gitignored / historical) |
+
+**No "after" column, deliberately.** These documents cross-pin each other, and this file is itself
+edited after them, so any "current" whole-file table here would be invalidated by the very next edit —
+which is precisely the failure mode this errata exists to clean up. Current values live where the
+repository already keeps them: `docs/INTEGRATION-RECORD.md` §1.3/§4 for the records, and `git log -p`
+for everything. The pinned values that *are* durable are the prefixes below.
 
 **The prefix property is what to trust.** Every byte-prefix recorded in `INTEGRATION-RECORD` §4 still
-verifies (`head -c <bytes> <file> | shasum -a 256`), including `81054f11…` over 61392 bytes and
-`938ec450…` over 20466 bytes, because all corrections here were **appended**. The whole-file values
-above are simply today's; the next edit to any of these files invalidates them, which is exactly why the
-judged content is preserved as prefixes rather than as whole-file hashes.
+verifies (`head -c <bytes> <file> | shasum -a 256`), including `81054f11…` over 61392 bytes,
+`938ec450…` over 20466 bytes and `a8586bdb…` over 57299 bytes, because all corrections here were
+**appended**.
+
+## E-7 · A prefix this pass broke and then restored (recorded as a lesson)
+
+The first attempt at the zod resolution (commit `97c56c3`) and the first attempt at the surface
+dispositions (commit `1346d59`) edited **mid-file** rows in `docs/MIGRATION-0.1.5-rc.2.md` — §6's
+change-list row 2, §7's R1 hypothesis and §9.3's probe note, plus §2's H12 verdict row. That file is
+append-only by contract: each insert shifted every later byte, so its documented
+`57299`-byte prefix `a8586bdb…` **stopped verifying**, even though the inserted text was correct.
+
+Both are corrected in this pass: those edits were reverted, the file is byte-identical to
+`2d6de7d`'s revision (whole-file `77029ceb…`), and the same content now lives in an appended §11 block
+— so `head -c 57299 docs/MIGRATION-0.1.5-rc.2.md | shasum -a 256` returns `a8586bdb…` again.
+
+The rule this establishes for anyone editing these records: **an append-only document may only grow at
+its end.** A correction that must be visible next to the claim it corrects has to go in this errata
+file, not in the body — which is why this file exists rather than a set of in-place rewrites.
 
 Line/byte figures quoted above were produced with `wc -l`, `wc -c`, `head -c <bytes> | shasum -a 256`
 and `shasum -a 256` against the files as they stand in this commit.

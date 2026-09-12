@@ -154,7 +154,7 @@ Per-package disposition for the version bump (measured, not assumed):
 | H9 | `@deepseek-ai/dsh-session-projection/types` merge (`SessionProjectionMap`, `SessionProjectionStateMap`) | **unchanged** |
 | H10 | `ctx.sessionProjectionCache.cachedSnapshot/coldSnapshot`, `SessionLogSnapshot.inheritedEventCount` | **signatures unchanged**, **behaviour changed** (format-version identity, §3.2) |
 | H11 | `sessionQuery.listSessions/readSession`, service names `sessionQuery`/`sessionProjectionCache` | **unchanged** |
-| H12 | projection keys read: `tokenUsage`, `subagentTiming`, owned `subagentOutcome` | **unchanged** (`subagentCatalog` added, unused — assessed by the 0.1.5 follow-up pass: it is a `sessionProjections` projection owned by `dsh-subagent` (`lib/types/catalog.js:68`, registered `lib/types/index.js:129`) that records each local child creation on the **parent** session from `subagent/catalog` facts, excluding fork-inherited ones. No key collision with this plugin's `subagentOutcome`. It is a candidate *alternative data source* for the row list — it could replace the `sessionQuery` cold-path read and make cold rows exact — but adopting it is a feature change, not a migration requirement. Disposition recorded in `README.md` § "Platform surfaces this plugin deliberately does not use" |
+| H12 | projection keys read: `tokenUsage`, `subagentTiming`, owned `subagentOutcome` | **unchanged** (`subagentCatalog` added, unused) |
 | H13 | `dsh.bundle.patch` + `cordis.patch.yml` `insert:` row | **unchanged** (`applyEntryPatches` byte-identical) |
 | C1 | `ctx.slots` / `ctx.slots.inject` / `ctx.slots.register` (`@deepseek-ai/dsh-client-ui-renderer/client` + `-slots`) | **unchanged** |
 | C2 | `sidebar.footer.action` + `SidebarFooterActionOwnerProps.wide` | **unchanged** |
@@ -495,7 +495,7 @@ Severity: **P0** = required for the plugin to load/behave on 0.1.5-rc.2 ·
 | # | Pri | Change | Target |
 |---|---|---|---|
 | 1 | P0 | Bump every pinned `@deepseek-ai/*` devDependency `0.1.2-rc.1 → 0.1.5-rc.2`; leave `@deepseek-ai/cordis` at `4.0.2` | `package.json:66-80` |
-| 2 | P0 | Resolve the zod question (R1): either confirm a single installed zod (both the plugin's `^4.4.3` and the platform's `^4.4.3` dedupe), or raise the plugin's dependency to `^4.6.2` so plugin and platform share one zod — **DONE (0.1.5 follow-up pass)**: neither branch was needed once the bundle was measured to inline zod and import nothing from it at runtime; `zod` moved from `dependencies` to `devDependencies`, which removes the two-copy install shape entirely. See §7 R1 | `package.json` `devDependencies` |
+| 2 | P0 | Resolve the zod question (R1): either confirm a single installed zod (both the plugin's `^4.4.3` and the platform's `^4.4.3` dedupe), or raise the plugin's dependency to `^4.6.2` so plugin and platform share one zod | `package.json:45` |
 | 3 | P0 | `dsh.client.inject`: remove `@deepseek-ai/dsh-client-ui-primitives`; add `@deepseek-ai/dsh-client-ui-sidebar-right`; add `@deepseek-ai/dsh-api-session-controller` (recommended) | `package.json:16-22` |
 | 4 | P0 | Keep `@deepseek-ai/dsh-client-ui-primitives` and `@deepseek-ai/dsh-client-ui-slots` as devDependencies: `tree.tsx:29-33` resolves icons through them at build time, and **other** platform packages' `.d.ts` resolve `slots`/`store` from the plugin's install | `package.json:69,73` |
 | 5 | P0 | Add devDependency `@deepseek-ai/dsh-client-ui-sidebar-right@0.1.5-rc.2` (types for the new registration) | `package.json:64-80` |
@@ -532,16 +532,6 @@ Settling experiment: after the devDependency bump run `pnpm install`, then
 `ls node_modules/.pnpm | grep -E '^zod@'` (expect exactly one version) and
 `pnpm typecheck`. If two versions appear, set `zod` to the platform's version
 (`^4.6.2`) and re-run.
-
-> **RESOLVED (0.1.5 follow-up pass).** The hypothesis was correct as a *static*-install hazard and is
-> now removed at the source rather than papered over. Measured: the repo installs exactly one zod
-> (`node_modules/.pnpm/zod@4.4.3`), the platform ships 4.6.2, and the host bundle contains **no**
-> runtime zod import — `lib/index.js` has exactly one external import
-> (`{ SessionLogOffset } from "@deepseek-ai/dsh-session"`) and inlines zod, so no zod object ever
-> crosses the plugin/platform boundary at runtime. `zod` therefore moved from `dependencies` to
-> `devDependencies`: it is build-time-only, and the two-copy install shape that produced TS2739 can
-> no longer arise from this package's manifest. `pnpm typecheck` exit 0 and the bundle hashes are
-> unchanged by the move.
 
 **R2 — pre-upgrade projection-cache rows are unusable as fold shortcuts.**
 HYPOTHESIS: because `checkpointIdentity` gained `formatVersion` and the domain
@@ -756,13 +746,6 @@ src/probe.ts(4,14): error TS2739: Type 'ZodObject<{ stopReason: ZodNullable<ZodS
 Plugin zod 4.4.3 schema → platform zod 4.6.2 `ZodType` = **incompatible**. Drives
 R1.
 
-> **Post-resolution note (0.1.5 follow-up pass).** This probe remains a true statement about the
-> *types* — and it is why the plugin's own build must typecheck against one zod — but it never
-> reached runtime: the shipped host bundle has no zod import at all (only
-> `@deepseek-ai/dsh-session`), so no zod schema object is ever handed to the platform's 4.6.2
-> copy. The probe is retained as the reason `zod` is a **build-time** dependency rather than a
-> runtime one; see R1's resolution above and `docs/INTEGRATION-RECORD.md` §3.
-
 ### 9.4 Module-table / require inventory
 
 ```
@@ -838,3 +821,43 @@ no change (item 7), and its rebuilt host half is byte-identical to `HEAD`.
   produced the shipped `inject` list and optional peer.
 - [`INTEGRATION-RECORD.md`](./INTEGRATION-RECORD.md) — final assembly record: delivered hashes, the
   recorded fresh-install reproduction, the packaging audit and the residual limitations.
+
+---
+
+## 11. Follow-up pass — resolutions and assessments (0.1.5)
+
+> Appended by the `0.1.5` follow-up pass. This section, like the `t6` block above it, is **appended**:
+> every byte before these two blocks is unchanged, which is why the `57299`-byte prefix
+> `a8586bdb…` still verifies. That property is exactly what the previous two commits in this pass
+> broke by inserting lines into §6 and §9.3, and what this section restores — the notes live here
+> now, not in the middle of the inventory.
+
+**11.1 — Change-list item 2 / §7 R1 (zod): RESOLVED.** Neither proposed branch was needed. Measured:
+the repo installs exactly one zod (`node_modules/.pnpm/zod@4.4.3`); the platform ships `4.6.2`; and the
+host bundle has **no** runtime zod import — `lib/index.js` has exactly one external import
+(`{ SessionLogOffset } from "@deepseek-ai/dsh-session"`) and inlines zod (295 zod marker strings). No
+zod object therefore crosses the plugin/platform boundary, so the two-copy install shape that produced
+the §9.3 TS2739 probe cannot arise. `zod` moved from `dependencies` to `devDependencies` accordingly —
+build-time only. The §9.3 probe remains true about *types* (it is why the build must typecheck against
+one zod) and is retained as the reason for that placement. `pnpm typecheck` exit 0; both bundle hashes
+unchanged by the move.
+
+**11.2 — §2 verdict-table row H12 (`subagentCatalog`), assessed.** Previously recorded only as "added,
+unused". It is not a service: it is a `sessionProjections` projection owned by `dsh-subagent`
+(`lib/types/catalog.js:68`, registered at `lib/types/index.js:129`) that folds `subagent/catalog`
+facts into the **parent** session — one fact per successful local child creation, one-shot and
+continuable alike, fork-inherited facts excluded — and exposes the direct-child list through
+`projections.values.subagentCatalog`. It does **not** collide with this plugin's owned
+`subagentOutcome` projection. Two consequences:
+
+- *Correctness:* nothing to fix. The plugin's row list does not depend on the catalog.
+- *Opportunity:* the catalog is the one plausible **alternative data source** for the row list. Because
+  it is a durable, parent-owned record of creation, it could replace the `sessionQuery` cold-path read
+  and make cold rows exact rather than reconstructed. Adopting it is a feature change, not a migration
+  requirement, and is deliberately not done in this pass.
+
+Disposition recorded in `README.md` § "Platform surfaces this plugin deliberately does not use",
+together with `@deepseek-ai/dsh-client-ui-subagent` (which registers `conversation.composer` and
+`conversation.session.header.lineage` — **not** `conversation.view`, so it does not contend for this
+plugin's tab seat, and this plugin already mirrors its row chevron deliberately) and the unused
+`sidebar.right.pane.tab.guide` / `…tab.menu.item` / `sidebar.panel-list` / `usePanelInfo` surfaces.
