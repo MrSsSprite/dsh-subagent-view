@@ -142,7 +142,7 @@ here, because a numeric figure in this file would be re-staled by the next body 
 | document | bytes before the trailer | prefix sha256 | verdict |
 |---|---|---|---|
 | `docs/RIGHTBAR-INTEGRATION-SPEC.md` | 61392 | `81054f1188603611102ef42db534ec97d88bddbfeec7caada0d473beb9838beb` | **PREFIX-OK** |
-| `docs/MIGRATION-0.1.5-rc.2.md` | 57299 | `a8586bdb21794b7f961b5226d72694ed05b1529b125b16adb8cb839d3a62f9ea` | **PREFIX-OK** |
+| `docs/MIGRATION-0.1.5-rc.2.md` | 57299 | `a8586bdb21794b7f961b5226d72694ed05b1529b125b16adb8cb839d3a62f9ea` | **PREFIX-OK** — re-verified by the 0.1.5 follow-up pass, which had to move two mid-file note insertions into an appended §11 block to keep this row true; whole-file hash is now `5149ada8420be4d41960340e9ccfceba0f368a802de479741d02f24abface89c` |
 | `docs/VERIFICATION-RIGHTBAR.md` | 20466 | `938ec4503e17c7e3e0a899ec97a614fbe9669845b9bdc123f1a78f484ebc6477` | **PREFIX-OK** |
 | `docs/REVIEW-RIGHTBAR.md` | no live figure (`t10`) | historical only: `b5a71982…` over 22944 bytes (the `pass` revision), then `15ae66e2…` over 24414 bytes (post-`t8`) — both superseded by later body edits | **APPEND-ONLY DECLARATION (`t10`)** — the trailer records no numeric self-hash, so there is no live prefix to verify; the per-revision recipes live in the `t5`/`t8`/`t10` task outputs |
 | `docs/DELIVERY-RECORD-0.1.5-rc.2.md` | 9570 | `fac978acae2eaef2…` | pre-errata prefix (whole file before the 0.1.5 follow-up pass appended its pointer); current whole-file hash `6ddcf0d052b037dbb73f2a68955f629949fcb9fa80f4fac0660a556514f956c3` |
