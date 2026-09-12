@@ -311,6 +311,23 @@ delivered artifacts byte-for-byte:
 The recorded check and its exact commands are in
 [docs/INTEGRATION-RECORD.md](./docs/INTEGRATION-RECORD.md).
 
+**Platform pin.** The build is verified against the DSH `0.1.5-rc.2` web shell — the artifact the
+browser actually loads. It is pinned here by name *and* hash so a later platform change cannot
+silently invalidate the claims in `docs/` (`shasum -a 256` the installed file to re-check):
+
+| installed platform artifact | value |
+| --- | --- |
+| `@deepseek-ai/dsh-web-frontend` | `0.1.5-rc.2` |
+| `dist/assets/index-BKQ_L1z6.js` | 555,959 bytes — sha256 `ae6b5df63da1ac26890eeb1847272005ab3860048d8fb46de1d08732861703c3` |
+| `dist/index.html` | sha256 `08feea36f5f7a805fe3b2b8cb70c286f54f3536eb036f5cc266d2981c4d57cc4` |
+| `dist/assets/vendor-CCJJTK99.js` | sha256 `38f95ea3ff85b49dc4d8f237db208bbaedd2cb8c31611215c246dde41786ff21` (byte-identical to the `0.1.2-rc.1` shell) |
+
+The shell's module table is the 9-word seed list documented in `tsdown.config.ts`: `react`,
+`react/jsx-runtime`, `react-dom`, `react-dom/client`, `@deepseek-ai/cordis`,
+`@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-slots`,
+`@deepseek-ai/dsh-client-ui-primitives` and `@deepseek-ai/dsh-client-ui-dockkit` — one word more than
+`0.1.2-rc.1`, where `dockkit` did not exist and the right sidebar was not built over it.
+
 ## Documentation
 
 | Document | What it answers |
@@ -355,8 +372,11 @@ package into the profile, so a rebuild in this repo does not reach the profile's
 the client module system caches per-package metadata (including `dsh.client.inject`) per process,
 and the host half is imported once at boot. See [Propagating a rebuild](#propagating-a-rebuild-the-install-is-a-copy).
 
-**Does it keep history forever?** The host keeps at most 200 rows per root session, evicting
-the oldest finished rows first.
+**Does it keep history forever?** No — the host keeps at most 200 observed rows per root session
+(`MAX_ROWS_PER_ROOT`, `src/index.ts:183`), evicting the oldest finished rows first
+(`prune()`, `src/index.ts:213-236`). The cap is deliberately soft for live work: running rows are
+never evicted, so a burst of more than 200 concurrent subagents under one root can exceed it until
+those runs finish and become evictable.
 
 ## License
 

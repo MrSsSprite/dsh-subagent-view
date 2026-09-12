@@ -84,13 +84,20 @@ entries for superseded states, not files that exist on disk.
 - **`t4`** (independent verification) verified the **post-repair** revision: `lib/client.js`
   `0672957…`, `lib/index.js` `2f7bcda7…` (≡ `HEAD`), spec `81054f11…` (836 lines). Per the captain's
   `t7` brief, its verdict was filed against `docs/VERIFICATION-RIGHTBAR.md` content `2b2e34d6…` and the
-  file has since moved by a one-sentence informational delta; the file on disk currently hashes
-  `938ec4503e17c7e3e0a899ec97a614fbe9669845b9bdc123f1a78f484ebc6477` (measured in this task). I inspected
+  file has since moved by a one-sentence informational delta; the file on disk then hashed
+  `938ec4503e17c7e3e0a899ec97a614fbe9669845b9bdc123f1a78f484ebc6477` (measured in this task). That
+  value is the **first 20466 bytes** of the file — the same figure `§4` above and
+  `docs/INTEGRATION-RECORD.md` §4 record as the verified prefix — not the whole-file hash, which is
+  `d0c5a9f433685fbc57c51c16a3e4422143ea0d91ad7674926e408c5a33b4f8d6` (see the errata addendum at the
+  end of this file). I inspected
   that current file read-only: its appended "Revision this verification is against" note re-states the same
   three artifact pins and the F2 carry-forward, and adds no new finding.
 - **`t5`** (review) returned **`pass`** on the same revision; its report,
-  `docs/REVIEW-RIGHTBAR.md`, currently hashes `b5a71982d4d880f9719e528c37138770cbac094f7cf1315b93f7a6bed899a79c`
-  and states that `DEV-1` is obsolete against this revision and that the recorded deviations are accurate.
+  `docs/REVIEW-RIGHTBAR.md`, hashed `b5a71982d4d880f9719e528c37138770cbac094f7cf1315b93f7a6bed899a79c`
+  when this record was written (superseded: that revision's header pin was refreshed by `t8` and the
+  file now hashes `ffd76322a790c8b5aaace5d47c79f2f713641155a994adf13489be74b3ab84d0` — see
+  `docs/INTEGRATION-RECORD.md` §1.3/§4), and states that `DEV-1` is obsolete against this revision and
+  that the recorded deviations are accurate.
 - The frozen artifact hashes above are therefore the ones both gates judged, and the two corrections that
   produced them are the ones this record files.
 
@@ -98,7 +105,7 @@ entries for superseded states, not files that exist on disk.
 
 | command | exit | observed result |
 |---|---|---|
-| `shasum -a 256 src/client/index.ts package.json lib/client.js lib/index.js` | 0 | `fdb6a53b…`, `9934c2b2…`, `0672957…`, `2f7bcda7…` — identical before and after writing this file |
+| `shasum -a 256 src/client/index.ts package.json lib/client.js lib/index.js` | 0 | `fdb6a53b…`, `89256ab9…`, `0672957…`, `2f7bcda7…` — identical before and after writing this file. As first filed this row read `9934c2b2…` for `package.json`: that was the **pre-`t6`** value, superseded by `t6`'s packaging-only edit and contradicted by §3 of this same record; corrected here (see the errata addendum) |
 | `shasum -a 256 docs/RIGHTBAR-INTEGRATION-SPEC.md` | 0 | `81054f11…` (836 lines) |
 | `git status --short` | 0 | see §6: this task adds only `docs/DELIVERY-RECORD-0.1.5-rc.2.md`; every other entry pre-dates it |
 | `git diff --stat` (informational) | 0 | pre-existing migration changes only; no artifact was modified by this task |
@@ -121,3 +128,7 @@ from 2026-09-12 01:05 and predates this migration: its manifest still lists
 `@deepseek-ai/dsh-client-ui-primitives` in `dsh.client.inject`, has no `sidebar-right` peer and no
 `peerDependenciesMeta`. Refreshing that profile is the integrator's (`t6`) step; it does not affect the
 repository hashes in §3.
+
+---
+
+**Errata (0.1.5 follow-up pass).** This record mislabelled `938ec450…` as the whole-file hash of `docs/VERIFICATION-RIGHTBAR.md` (it is that file's 20466-byte judged prefix; the whole file is `d0c5a9f4…`) and reported `package.json` as `9934c2b2…` (the pre-`t6` value; the shipped file is `89256ab9…`). Both were corrected in place above. See [`docs/ERRATA-0.1.5.md`](./ERRATA-0.1.5.md). Appended, not inserted: every byte above this line is unchanged, so the prefixes this record pins still verify.

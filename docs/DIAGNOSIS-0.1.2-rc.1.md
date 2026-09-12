@@ -330,3 +330,7 @@ $ curl -s "http://127.0.0.1:3080/api/subagent-view/tab?sessionId=session-035d283
 
 Then confirm in the browser: the sidebar panel lists the live member rows while they run, and the
 "Subagents" tab renders the same forest (not its empty state).
+
+---
+
+**Errata (0.1.5 follow-up pass).** This is a dated record of the `0.1.2-rc.1` round (2026-09-11): the platform path in line 4 points at `0.1.5-rc.2` today, and the `index-Df-65__b.js` shell it cites is deliberately the `0.1.2-rc.1` frontend. Nothing in it is rewritten; read it as history, not as current state. See [`docs/ERRATA-0.1.5.md`](./ERRATA-0.1.5.md). Appended, not inserted: every byte above this line is unchanged, so the prefixes this record pins still verify.

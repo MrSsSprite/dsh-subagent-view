@@ -297,3 +297,7 @@ and the rest of §5.1's suite was re-run at exit 0 by `t6`. `F-2` was closed by
 - [`DELIVERY-RECORD-0.1.5-rc.2.md`](./DELIVERY-RECORD-0.1.5-rc.2.md) — the record that closes `F-2`.
 - [`INTEGRATION-RECORD.md`](./INTEGRATION-RECORD.md) — final assembly record: delivered hashes, the
   recorded fresh-install reproduction, the packaging audit and the residual limitations.
+
+---
+
+**Errata (0.1.5 follow-up pass).** Line 167 ("`~/.dsh/profiles/web` links this repo") is superseded: the profile holds an install-time **copy** of this repo, not a link, and its contents are byte-identical to the migrated build (see §E-3 of the errata file). No verdict, finding or acceptance result in this review is affected. See [`docs/ERRATA-0.1.5.md`](./ERRATA-0.1.5.md). Appended, not inserted: every byte above this line is unchanged, so the prefixes this record pins still verify.

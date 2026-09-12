@@ -44,12 +44,12 @@ Measured with `shasum -a 256` from the repository root after the last write of `
 |---|---|---|
 | `package.json` | `89256ab9af087f49b8999eadcd438f11c6d1f334ae9a987ccac0e2c58c75253a` | yes — `description`, `keywords`, two `files[]` entries (§3) |
 | `cordis.patch.yml` | `6ae0334da781155ba31df355bf606f46db0370cbf95e06744c4e77c90a9a2356` | no |
-| `README.md` | `7afe415744e5cf43678475d56f56115f1b5f1fc987dd2536dcfad596db4038f8` | yes — rewritten for the right-sidebar integration |
+| `README.md` | `7afe415744e5cf43678475d56f56115f1b5f1fc987dd2536dcfad596db4038f8` | yes — rewritten for the right-sidebar integration. **Superseded:** `3bed7772a2cf88ec84e24a470710db86d22a0395842144e2340d5acc7c73eaff` after the 0.1.5 follow-up pass (row-cap correction, platform pin, new surfaces section); the pin recorded here is the `t6` hand-over value |
 | `docs/RIGHTBAR-INTEGRATION-SPEC.md` | `53e3e3144f21cb4d83c85d81bc454438dfb9957182e0b874e8c2242747a46f63` | append-only cross-link trailer (§4) |
 | `docs/MIGRATION-0.1.5-rc.2.md` | `77029ceba77c2db292e9b1aff5c4de4fb77d55ed78236afafc11a1bb5081ad4f` | append-only cross-link trailer (§4) |
 | `docs/VERIFICATION-RIGHTBAR.md` | `d0c5a9f433685fbc57c51c16a3e4422143ea0d91ad7674926e408c5a33b4f8d6` | append-only cross-link trailer (§4) |
-| `docs/REVIEW-RIGHTBAR.md` | `44650948edf88dbaba8dab0d8fc4149803dc6bf83884ea47db83789a4270aded` | 299 lines (`wc -l`), 30151 bytes (`wc -c`) — pin refreshed by `t11` after the `t8` header-pin refresh and the `t10` append-only pass, then re-pinned by `t12` after the reviewer's line-38 correction (§4) |
-| `docs/DELIVERY-RECORD-0.1.5-rc.2.md` | `4f679c873b845629cf2ef04983e8432cc963f8ca62ef2b90e4f53952fc6b791d` | 123 lines — pin refreshed by `t11` to the post-`t9` value (the three-site post-`t6` pass) |
+| `docs/REVIEW-RIGHTBAR.md` | `44650948edf88dbaba8dab0d8fc4149803dc6bf83884ea47db83789a4270aded` | 299 lines (`wc -l`), 30151 bytes (`wc -c`) — pin refreshed by `t11` after the `t8` header-pin refresh and the `t10` append-only pass, then re-pinned by `t12` after the reviewer's line-38 correction (§4). **Superseded:** `ffd76322a790c8b5aaace5d47c79f2f713641155a994adf13489be74b3ab84d0` (303 lines, 30647 bytes) after the 0.1.5 follow-up pass appended an errata pointer |
+| `docs/DELIVERY-RECORD-0.1.5-rc.2.md` | `6ddcf0d052b037dbb73f2a68955f629949fcb9fa80f4fac0660a556514f956c3` (see the errata note below; the `t6` hand-over value was `4f679c873b845629cf2ef04983e8432cc963f8ca62ef2b90e4f53952fc6b791d`) | 131 lines — pin refreshed by `t11` to the post-`t9` value (the three-site post-`t6` pass), then re-measured by the 0.1.5 follow-up pass after two in-place hash corrections and an appended errata pointer |
 | `docs/DIAGNOSIS-0.1.2-rc.1.md`, `docs/FIX-0.1.2-rc.1.md` | `10322f4e…`, `e3fc7a54…` | no (previous round) |
 
 The delivery is the **working tree**, not a git commit: `HEAD` remains
@@ -145,6 +145,9 @@ here, because a numeric figure in this file would be re-staled by the next body 
 | `docs/MIGRATION-0.1.5-rc.2.md` | 57299 | `a8586bdb21794b7f961b5226d72694ed05b1529b125b16adb8cb839d3a62f9ea` | **PREFIX-OK** |
 | `docs/VERIFICATION-RIGHTBAR.md` | 20466 | `938ec4503e17c7e3e0a899ec97a614fbe9669845b9bdc123f1a78f484ebc6477` | **PREFIX-OK** |
 | `docs/REVIEW-RIGHTBAR.md` | no live figure (`t10`) | historical only: `b5a71982…` over 22944 bytes (the `pass` revision), then `15ae66e2…` over 24414 bytes (post-`t8`) — both superseded by later body edits | **APPEND-ONLY DECLARATION (`t10`)** — the trailer records no numeric self-hash, so there is no live prefix to verify; the per-revision recipes live in the `t5`/`t8`/`t10` task outputs |
+| `docs/DELIVERY-RECORD-0.1.5-rc.2.md` | 9570 | `fac978acae2eaef2…` | pre-errata prefix (whole file before the 0.1.5 follow-up pass appended its pointer); current whole-file hash `6ddcf0d052b037dbb73f2a68955f629949fcb9fa80f4fac0660a556514f956c3` |
+| `docs/VERIFICATION-RIGHTBAR.md` | 22348 | `d0c5a9f433685fbc…` | pre-errata prefix; current whole-file hash `fc0bd387e8fa6332a8aaa3623ed8d54f1b52c215f092fadaca25eed4bade35e5`. Note `20466`/`938ec450…` above is a **prefix of the judged revision**, not of the current file |
+| `docs/REVIEW-RIGHTBAR.md` | 30151 | `44650948edf88dba…` | pre-errata prefix; current whole-file hash `ffd76322a790c8b5aaace5d47c79f2f713641155a994adf13489be74b3ab84d0` (303 lines) |
 
 **`REVIEW-RIGHTBAR.md`'s trailer: re-stamp, then append-only declaration.** While `t6` was assembling,
 the reviewer ran `t8` and refreshed the stale `package.json` pin in `REVIEW-RIGHTBAR.md`'s header table
@@ -189,6 +192,14 @@ in `dsh.client.inject` and has neither the `sidebar-right` peer nor `peerDepende
 confirms steps 1–3, the running server serves that older revision, so **the right-sidebar Subagents tab
 does not exist in the running app yet**. That is expected, not a defect of the delivered tree.
 
+> **SUPERSEDED (0.1.5 follow-up pass).** All three statements above were true when `t6` assembled this
+> record and are false now. Steps 1–3 were carried out: the profile copy was refreshed at **02:13** and
+> is byte-identical to the migrated build (`package.json` `89256ab9…`, `lib/client.js` `06729579…`,
+> `lib/index.js` `2f7bcda7…`, `cordis.patch.yml` `6ae0334d…`), and the live process (PID 88556 on
+> `127.0.0.1:3080`) serves it — its `/plugins/events` graph frame carries the `subagent-view` row with
+> the migrated 7-id inject list, and both plugin routes answer `200`. The rightbar tab **is** in the
+> running app; a browser reload is the only remaining user step. See `docs/ERRATA-0.1.5.md` §E-3.
+
 ## 6. Residual limitations and open questions (acceptance 7)
 
 **Not verifiable without a live profile install / user confirmation (carried from the spec's hypotheses):**
@@ -218,7 +229,9 @@ does not exist in the running app yet**. That is expected, not a defect of the d
 - **L5 — cross-version `zod`** (migration R1): the workspace installs exactly one `zod` (4.4.3) and the
   host half bundles it, so typecheck and the real-projection harness pass; the platform's own copy may be
   a different 4.x at runtime, which the projection registration tolerates in every check run here but
-  remains an install-shape dependency rather than a proven identity.
+  remains an install-shape dependency rather than a proven identity. **Closed by the 0.1.5 follow-up
+  pass:** the host bundle has no runtime zod import at all, so no zod object crosses the boundary;
+  `zod` moved to `devDependencies` and migration R1 / change item 2 are marked RESOLVED.
 - **L6 — `REVIEW.md` (repository root) is stale.** It documents an earlier round and is not linked from
   the new README; it was left untouched because it is a historical record.
 - **L7 — team working material is not part of the package.** `.verify/`, `.scratch/`, `.agent-teams/` and
@@ -231,6 +244,8 @@ does not exist in the running app yet**. That is expected, not a defect of the d
   `src/client/rightbar.tsx` and the six new `docs/*.md` records
   (`RIGHTBAR-INTEGRATION-SPEC`, `MIGRATION-0.1.5-rc.2`, `VERIFICATION-RIGHTBAR`, `REVIEW-RIGHTBAR`,
   `DELIVERY-RECORD-0.1.5-rc.2`, `INTEGRATION-RECORD`).
+  **RESOLVED:** the tree was committed as `2d6de7d4f0bc457a4daa251341493129c49b385d` and has been clean
+  since; the 0.1.5 follow-up pass builds on top of it with further commits.
 
 **Open questions for the captain / user:**
 
@@ -245,3 +260,7 @@ does not exist in the running app yet**. That is expected, not a defect of the d
 - **Q3** — the profile also composes a third-party rightbar tab type (review O-3: `dsh-context`, guide
   entry `order 20`, same order as this plugin's). Order ties follow registration order, so the capsule
   order in the live profile may differ from a stock install; acceptable, but worth a visual check.
+
+---
+
+**Errata (0.1.5 follow-up pass).** Superseded here: §1 says the delivery is an uncommitted working tree at `HEAD f67aa112…` — it is committed as `2d6de7d4…` with a clean tree; §5 and `docs/DELIVERY-RECORD-0.1.5-rc.2.md` §7 describe the profile copy as pre-migration and the rightbar tab as absent from the running app — the copy was refreshed at 02:13 and the live process on `127.0.0.1:3080` serves the migrated revision (see §4 of this errata file). See [`docs/ERRATA-0.1.5.md`](./ERRATA-0.1.5.md). Appended, not inserted: every byte above this line is unchanged, so the prefixes this record pins still verify.

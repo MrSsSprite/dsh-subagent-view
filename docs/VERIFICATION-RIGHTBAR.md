@@ -354,3 +354,7 @@ finding `F-1`), is indeed absent from the delivered tree, so no harness fails by
   report's F1/F2 timeline records.
 - [`INTEGRATION-RECORD.md`](./INTEGRATION-RECORD.md) — final assembly record: delivered hashes, the
   recorded fresh-install reproduction, the packaging audit and the residual limitations.
+
+---
+
+**Errata (0.1.5 follow-up pass).** This file is intact; the 20466-byte prefix recorded for it (`938ec450…`) still verifies, and the whole-file hash is `d0c5a9f4…`. `docs/DELIVERY-RECORD-0.1.5-rc.2.md` §4 mislabelled the prefix as the whole-file hash. See [`docs/ERRATA-0.1.5.md`](./ERRATA-0.1.5.md). Appended, not inserted: every byte above this line is unchanged, so the prefixes this record pins still verify.

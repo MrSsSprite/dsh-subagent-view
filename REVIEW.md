@@ -200,3 +200,7 @@ No typos requiring fixes were found; no project files were modified by this revi
 other than adding this `REVIEW.md`.
 
 *Reviewer: reviewer (team subagent-view-dev) · Review date: 2025-08-27 · Commit reviewed: ac4b66b*
+
+---
+
+**Errata (0.1.5 follow-up pass).** Scope: this review judges commit `ac4b66b`, a pre-`0.1.5` revision of the plugin. Its "PASSES overall" verdict does not describe the shipped `0.1.5-rc.2` revision, whose contract-and-parity review is `docs/REVIEW-RIGHTBAR.md`. See [`docs/ERRATA-0.1.5.md`](./ERRATA-0.1.5.md). Appended, not inserted: every byte above this line is unchanged, so the prefixes this record pins still verify.
