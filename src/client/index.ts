@@ -1,10 +1,15 @@
 /**
  * subagent-view, browser half entry: the plugin body only (no JSX — tsdown
- * pins the client bundle entry to src/client/index.ts). The docked bar and
- * panel live in ./panel.tsx, registered into the `sidebar.footer.action`
- * seat at the bottom of the left sidebar.
+ * pins the client bundle entry to src/client/index.ts). Two hosts of one
+ * monitor:
+ *  - the docked bar and panel in the left sidebar (`./panel.tsx`, seat
+ *    `sidebar.footer.action`), and
+ *  - a right-sidebar tab type (`./rightbar.tsx`: stage one into
+ *    `ctx.sidebarRightTabs`, stage two into the keyed `sidebar.right.pane.tab`
+ *    seat), sharing one store, one poller and one panel card (`./monitor.tsx`).
+ * The conversation's Subagents view (`./subagents-tab.tsx`) is unchanged.
  */
-// The browser half's type homes under DSH 0.1.2-rc.1: the client context is
+// The browser half's type homes under DSH 0.1.5-rc.2: the client context is
 // `@deepseek-ai/cordis`, while `SessionId` and `SubagentAddress` are reached
 // through the session/subagent packages the client controllers re-export them
 // from. (`@deepseek-ai/dsh-client-runtime` is not published beyond 0.1.1-rc.2,
@@ -12,13 +17,17 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
-// Slot-contract merges: `ui-renderer` declares `ctx.slots`, `ui-session` adds
+// Slot-contract merges: `ui-renderer` declares `ctx.slots`; `ui-session` adds
 // the standard session kit (`sessionId`, `useSessions`) that every
-// session-scope slot component receives. Both are type-only.
+// session-scope slot component receives; `ui-sidebar-right` declares the
+// `sidebar.right.pane.tab` seat and provides `ctx.sidebarRightTabs`. All are
+// type-only.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { SubagentViewBarPanel, setSessionsService, type MonitorSessionsService } from './panel'
 import { SubagentsView } from './subagents-tab'
+import { SubagentRightbarTab, subagentTabDefinition, SUBAGENT_VIEW_ID } from './rightbar'
 
 export const inject = ['slots', 'sessions', 'layout']
 
@@ -106,6 +115,18 @@ export function apply(ctx: ClientContext): void {
   cursor: pointer;
 }
 .sav-panel-header:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04)); }
+/* Right-sidebar tab body (deviation D-2): the same card fills the pane instead
+   of floating inside the left column, so the row list scrolls inside the tab.
+   The visual tokens (background, border, radius, shadow, overflow) are the
+   .sav-panel ones; only the box's geometry changes. */
+.sav-panel-tab {
+  flex: 1 1 auto; height: 100%; min-height: 0;
+  max-height: none; margin-bottom: 0;
+}
+/* Deviation D-3: inside a tab the header has no collapse action, so it must not
+   advertise one. */
+.sav-panel-header-tab { cursor: default; }
+.sav-panel-header-tab:hover { background: transparent; }
 .sav-panel-title { flex: none; font-weight: 600; font-size: 13px; line-height: 18px; }
 .sav-panel-running {
   flex: none; color: var(--dsw-alias-brand-primary, #2563eb); font-size: 11px;
@@ -522,4 +543,42 @@ export function apply(ctx: ClientContext): void {
       SubagentsView,
     ),
   )
+
+  // Right-sidebar tab type: registered only while the rightbar's registry
+  // service is actually composed (R11.1/R11.6 of docs/RIGHTBAR-INTEGRATION-SPEC.md).
+  // `ctx.inject` is cordis's inject-scoped plugin form: the callback is unloaded
+  // and re-run whenever a required service changes, and on a deployment without
+  // `@deepseek-ai/dsh-client-ui-sidebar-right` it simply never runs — the left
+  // bar/panel and the conversation Subagents view above stay unconditional, and
+  // no fiber is left pending (a pending entry is a fatal boot error in the
+  // 0.1.5-rc.2 shell: `assertEntriesActive` reports
+  // "web boot: N entries did not activate … (waiting for services: …)").
+  // The service must NOT go into the exported `inject` array: a service whose
+  // provider never arrives would leave this plugin's fiber pending forever.
+  ctx.inject(['sidebarRightTabs'], (scoped) => {
+    // Stage one: what the type IS. Purely static (addresses it recognizes, chip
+    // text, guide entries); no runtime hook lives here. A page type, so it names
+    // a kind and offers a guide capsule — the platform's own, throw-free way for
+    // a user to open it from the pane strip's add control. The plugin never
+    // calls `ctx.sidebarRight.*`: every controller command throws while no
+    // rightbar seat is mounted.
+    scoped.effect(
+      () => scoped.sidebarRightTabs.register(subagentTabDefinition()),
+      'subagent-view: rightbar tab type',
+    )
+
+    // Stage two: its body, into the keyed seat under the definition's `id` (not
+    // the kind). The seat owns scope/store/hooks; the body receives `sessionId`
+    // and `useSessions` as standard props.
+    scoped.effect(
+      () => scoped.slots.inject('sidebar.right.pane.tab', () => scoped.slots.register(
+        {
+          name: 'sidebar.right.pane.tab',
+          key: SUBAGENT_VIEW_ID,
+        },
+        SubagentRightbarTab,
+      )),
+      'subagent-view: rightbar tab body',
+    )
+  })
 }

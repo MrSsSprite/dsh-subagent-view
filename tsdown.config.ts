@@ -10,14 +10,24 @@
 const ID = 'subagent-view'
 
 /**
- * Specifiers the browser module table (DSH 0.1.2-rc.1 static seed table +
+ * Specifiers the browser module table (DSH 0.1.5-rc.2 static seed table +
  * preloaded client modules) answers, i.e. the ids the built bundle may
  * `require()` at runtime. Everything else is bundled.
  *
- * The seed table of 0.1.2-rc.1 is `react`, `react/jsx-runtime`, `react-dom`,
+ * The seed table of 0.1.5-rc.2 is `react`, `react/jsx-runtime`, `react-dom`,
  * `react-dom/client`, `@deepseek-ai/cordis`,
- * `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-slots` and
- * `@deepseek-ai/dsh-client-ui-primitives`.
+ * `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-slots`,
+ * `@deepseek-ai/dsh-client-ui-primitives` and
+ * `@deepseek-ai/dsh-client-ui-dockkit` (one word more than 0.1.2-rc.1).
+ *
+ * Invariant: this list must stay a SUBSET of the served id set (seed words plus
+ * arrived graph rows) and a SUPERSET of every specifier the built bundle
+ * requires. `@deepseek-ai/dsh-client-ui-dockkit` is deliberately absent: the
+ * rightbar tab type imports its contract type-only, so nothing in the bundle
+ * requires it (types are erased). Everything else — including
+ * `@deepseek-ai/dsh-client-ui-sidebar-right` — is either bundled (never
+ * external) or reaches the page through the `dsh.client.inject` graph rows,
+ * never through `require()`.
  */
 const CLIENT_EXTERNALS = [
   'react',
