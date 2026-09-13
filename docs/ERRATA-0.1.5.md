@@ -187,10 +187,31 @@ are corrected rather than errata'd, so their current content is the record):
 
 | document | what changed | how to read it |
 |---|---|---|
-| `README.md` | surface table, Features, Platform notes, FAQ, the delivered-hash table | `git diff README.md`. **No pre-edit hash is recorded here on purpose** — this pass did not capture one, and inventing one would be exactly the error E-1 exists to correct |
-| `DSH.md` | §1/§2/§3/§5/§6/§8/§9/§10 and the measured-state header | `git diff DSH.md`; the file is untracked in git, so a commit must `git add DSH.md` to keep it |
+| `README.md` | surface table, Features, Platform notes, FAQ, the delivered-hash table | `git show cce5cb5 -- README.md`. **No pre-edit hash is recorded here on purpose** — this pass did not capture one, and inventing one would be exactly the error E-1 exists to correct |
+| `DSH.md` | §1/§2/§3/§5/§6/§8/§9/§10 and the measured-state header | it is **gitignored** (`.gitignore:16`, added by `114f215`), so there is no git history to diff — the working tree is the only copy |
+| `.gitignore` | gains `DSH.md`, so the agent-orientation file stays out of the repository | commit `114f215`, which is *not* part of E-8 and landed between `be10be3` and E-8's own commit |
 
 **The prefix property still holds.** `head -c 61392 docs/RIGHTBAR-INTEGRATION-SPEC.md | shasum -a 256`
 = `81054f11…`, `head -c 57299 docs/MIGRATION-0.1.5-rc.2.md | shasum -a 256` = `a8586bdb…` and
 `head -c 20466 docs/VERIFICATION-RIGHTBAR.md | shasum -a 256` = `938ec450…`, all re-verified after
 this append. Every correction in this entry is at the end of this file; no byte above it moved.
+
+## E-9 · E-8's work landed: commit `cce5cb5`
+
+E-8 was written against a staged working tree, so its fingerprint table records `HEAD` as
+`be10be3…` and calls the retirement uncommitted. The retirement is now a commit; only `HEAD` moved,
+and every artifact hash in E-8's table is unchanged, so the table stays true of the artifacts and
+stale only about the commit. Measured after the commit:
+
+| item | value |
+|---|---|
+| E-8 commit | `cce5cb5` — `feat!: retire the left-sidebar panel and keep the bar display-only`, 11 files, +285/−425 |
+| its parent chain | `cce5cb5` → `114f215` (`.gitignore`: ignore `DSH.md`) → `be10be3`; verified against the remote, not just the local ref |
+| branch state | `main` and `origin/main` are both at `114f215` (`git ls-remote origin refs/heads/main` confirms), so `cce5cb5` is a local commit one ahead of `main`, **merged nowhere and pushed nowhere** |
+| `lib/index.js` / `lib/client.js` / `package.json` | `2f7bcda7…` / `febd441d…` / `1cd511a4…` — identical to E-8's table, re-checked after the commit |
+| working tree | clean. `DSH.md` does **not** appear in `git status` (ignored), and `lib/index.js` shows no modification — the host half is untouched, as a client-only change requires |
+
+The deployment note above is **unaffected by committing**: the profile copy is still the pre-change
+revision (`lib/client.js` `06729579…`, 7-id inject list) and the live process still serves it, so
+seeing the new bar in the app still requires the `dsh plugin add` + `dsh web` restart. Committing
+changed nothing about that — a `file:` install is a copy (§E-3).
