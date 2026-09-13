@@ -215,3 +215,46 @@ The deployment note above is **unaffected by committing**: the profile copy is s
 revision (`lib/client.js` `06729579…`, 7-id inject list) and the live process still serves it, so
 seeing the new bar in the app still requires the `dsh plugin add` + `dsh web` restart. Committing
 changed nothing about that — a `file:` install is a copy (§E-3).
+
+## E-10 · The conversation Subagents view gained a context bar (a wire-shape change)
+
+The `conversation.view` Subagents tab now draws a **context bar** on every row: one segment per type
+of context occupying that subagent's window (system prompt, tool definitions, conversation) plus the
+free remainder, sorted biggest-first with the free segment pinned last. E-6's rule applies — the
+README describing it is the live user-facing document and was corrected in place; this entry records
+the contract change itself.
+
+**The `/api/subagent-view/tab` wire gained one optional row field.** It is **added**, not changed:
+every existing member keeps its meaning, so an older client half reading a newer host half (or the
+reverse) degrades to "no bar" rather than misreading a row.
+
+| # | item | value |
+|---|---|---|
+| 1 | new field | `rows[].ctx`, an object with optional `window`, `system`, `tools`, `messages` (`number`, tokens) |
+| 2 | omitted when unreadable | absent entirely rather than `{}` or `undefined` members, per the "no `undefined` on the wire" rule both halves document |
+| 3 | source projections | the platform's `contextBreakdown` (the three classes) and `contextPressure.contextWindow` (the capacity), read through the `sessionProjections` service this plugin already injects |
+| 4 | projection key group | both keys joined `DECOR_KEYS` (now `tokenUsage`, `subagentTiming`, `contextBreakdown`, `contextPressure`). They share that group's single failure mode — a stored row whose `ver` disagrees with the live unit is *discarded* by the projection cache, never migrated, so the group loses values rather than throwing. `OUTCOME_KEYS` is untouched, so the value that decides a row's status still has its own isolated read |
+| 5 | surfaces | only the conversation view. `PanelRow` and the snapshot route are deliberately unchanged: the right-sidebar tab's cards carry no context bar, and `real-rows.mjs` asserts the snapshot stays free of the field |
+| 6 | colors | **gray is reserved for free space.** The three usage types are bright, widely hue-separated theme tokens — amber `--dsw-static-amber-500` (~38°), green `--dsw-static-green-400` (~142°), blue `--dsw-static-blue-450` (~215°, the one tint carried over from the composer meter) — each with an opaque hex fallback. The **free** segment is an opaque neutral gray (`--dsw-static-neutral-400`), with every fallback following the convention the rest of the sheet uses. This row was corrected twice after review: the free segment first used the `border-l3` hairline alias (~12% alpha), which drew the remainder as near-invisible background rather than as a segment; then the system prompt, drawn gray as `--dsw-static-neutral-bluish-400`, read as a *second* free-shaped segment, which is the confusion the amber/green/blue set removes. `context-bar.mjs` now enforces the rule structurally: every usage type needs saturation ≥ 0.5 and ≥ 40° hue separation, and free must be the only segment below 0.1 saturation |
+| 7 | tick | the client renders nothing unless a class is non-zero AND (a capacity is known OR usage is non-zero), so a subagent that never ran a request draws no bar and no "100% free" rail |
+
+**Measured facts this rests on** (re-checkable on this machine, 2026-09-13): 16 real subagent
+sessions under this workspace's root; every one reports `contextWindow` 1000000; the deployed
+projection medium holds `contextPressure` (ver 4) and `contextBreakdown` (ver **2** — an older
+generation than the platform's current 4, which the cache discards at read time by design) for all
+60 cached sessions. System+tool classes price at 10.4k–11.8k while provider-reported prompt sizes run
+105k–420k, so the three classes are disjoint and their sum is the occupancy.
+
+**No invariant moved.** No service was added to either exported `inject` array; the client bundle
+still `require()`s exactly `react`, `react/jsx-runtime` and
+`@deepseek-ai/dsh-client-ui-primitives`, so `CLIENT_EXTERNALS` is unchanged; both routes still answer
+`200` with a well-formed body for every input (verified over real HTTP, including a bogus and an
+empty `sessionId`). Because the host half changed, `lib/index.js` moved too — this is **not** a
+client-only change, so the profile copy needs a `dsh plugin add` **and** a `dsh web` restart before
+the running app serves it (§E-3's copy rule).
+
+**Not verified, stated so no reader over-credits it:** the bar's visual result in a browser. No
+browser is reachable here, and `.verify/context-bar.mjs` is structural only (it executes the shipped
+bundle against a recording React and asserts the element tree, ordering rule, widths, legend text and
+stylesheet selectors — it exercises no layout, paint or the CSS `min-width: 2px` floor as pixels).
+The L1/L9 limitation stands for this surface too.

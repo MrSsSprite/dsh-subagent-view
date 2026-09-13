@@ -121,6 +121,27 @@ interface AncestorRow {
 }
 
 /**
+ * Current context-window composition of one row's session, read from the
+ * platform's `contextBreakdown` (the three disjoint token classes) and
+ * `contextPressure` (`contextWindow`, the occupancy denominator).
+ *
+ * These describe the CURRENT context window, which is a different quantity from
+ * `TabRow.tokens` (the cumulative lifetime usage across every turn). Members are
+ * omitted, never set to undefined, so nothing undefined reaches the wire; when
+ * no member is readable at all the whole object is omitted.
+ */
+interface RowContext {
+  /** Context-window capacity in tokens (the occupancy denominator). */
+  window?: number
+  /** Heuristic tokens of the system prompt occupying the window. */
+  system?: number
+  /** Heuristic tokens of the tool definitions occupying the window. */
+  tools?: number
+  /** Heuristic tokens of the conversation surface occupying the window. */
+  messages?: number
+}
+
+/**
  * One tab row: an observed run enriched with durable catalog facts plus the
  * live activity / hasChildren / reason fields, the current-session marker and
  * the child's first post-seed user prompt (`purpose`). Optional members are
@@ -147,6 +168,8 @@ interface TabRow {
   purpose?: string
   /** Total provider-reported tokens (four disjoint buckets). */
   tokens?: number
+  /** Current context-window composition (see {@link RowContext}); omitted when unreadable. */
+  ctx?: RowContext
   /** Settled active-turn milliseconds. */
   settledMs?: number
   /** Open turn start (epoch ms), when one is in flight. */
@@ -420,6 +443,11 @@ export function apply(ctx: Context): void {
   /** Token + active-timing + outcome projections read for one row. */
   interface ProjectionsFor {
     tokens?: number
+    /** Current context-window composition, read from `contextBreakdown`/`contextPressure`. */
+    contextWindow?: number
+    systemTokens?: number
+    toolsTokens?: number
+    messageTokens?: number
     settledMs?: number
     activeSince?: number
     activeThrough?: number
@@ -579,11 +607,18 @@ export function apply(ctx: Context): void {
   const OUTCOME_KEYS = ['subagentOutcome']
 
   /**
-   * Decoration keys (token totals, settled/active timing), read as their own
-   * group so a rejecting unit here costs only the decoration and never the
-   * status.
+   * Decoration keys (token totals, the context composition the tab's bar
+   * draws, settled/active timing), read as their own group so a rejecting unit
+   * here costs only the decoration and never the status.
+   *
+   * `contextBreakdown` and `contextPressure` live in this group rather than in
+   * a third one because every key read here shares exactly one failure mode —
+   * a stored row whose `ver` disagrees with the live unit is discarded by the
+   * cache (never migrated), which lowers this group to fewer values but cannot
+   * make it throw. The bar is decoration by construction, so losing it must
+   * never cost the row's status.
    */
-  const DECOR_KEYS = ['tokenUsage', 'subagentTiming']
+  const DECOR_KEYS = ['tokenUsage', 'subagentTiming', 'contextBreakdown', 'contextPressure']
 
   /** The narrowed `keys` parameter of `snapshot`/`cachedSnapshot`; see above. */
   const keyList = (keys: readonly string[]): readonly never[] => keys as unknown as readonly never[]
@@ -768,15 +803,39 @@ export function apply(ctx: Context): void {
 
   /**
    * Extract the wire fields the tab needs from one session's projection
-   * values: tokenUsage (four disjoint buckets), subagentTiming (settled +
-   * active window), and the durable subagentOutcome stop reason.
+   * values: tokenUsage (four disjoint buckets), the context composition
+   * (contextBreakdown plus contextPressure's `contextWindow`), subagentTiming
+   * (settled + active window), and the durable subagentOutcome stop reason.
+   *
+   * Every member is validated defensively: a projection value is platform
+   * data, so a non-finite or negative count is dropped rather than allowed to
+   * reach the wire (the bar's widths are computed from these numbers).
    */
   const projectionsFor = (values: Record<string, unknown> | undefined): ProjectionsFor => {
     const out: ProjectionsFor = {}
     if (values === undefined) return out
+    /** Accept only a finite non-negative count; anything else is no value at all. */
+    const countOf = (value: unknown, positive = false): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) && value >= 0 && (!positive || value > 0)
+        ? value
+        : undefined
     const usage = values.tokenUsage as { uncachedInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | undefined
     if (usage !== undefined) {
       out.tokens = usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+    }
+    const breakdown = values.contextBreakdown as { systemTokens: number; toolsTokens: number; messageTokens: number } | undefined
+    if (breakdown !== undefined) {
+      const system = countOf(breakdown.systemTokens)
+      const tools = countOf(breakdown.toolsTokens)
+      const messages = countOf(breakdown.messageTokens)
+      if (system !== undefined) out.systemTokens = system
+      if (tools !== undefined) out.toolsTokens = tools
+      if (messages !== undefined) out.messageTokens = messages
+    }
+    const pressure = values.contextPressure as { contextWindow?: number } | undefined
+    if (pressure !== undefined) {
+      const window = countOf(pressure.contextWindow, true)
+      if (window !== undefined) out.contextWindow = window
     }
     const timing = values.subagentTiming as { settledMs: number; active?: { since: number; through: number } } | undefined
     if (timing !== undefined) {
@@ -791,6 +850,20 @@ export function apply(ctx: Context): void {
       out.stopReason = outcome.stopReason
     }
     return out
+  }
+
+  /**
+   * The context composition to put on the wire for one row, or undefined when
+   * no member is readable — that case must omit the field entirely rather than
+   * send an empty object, so the browser half's presence test stays meaningful.
+   */
+  const contextFor = (projections: ProjectionsFor): RowContext | undefined => {
+    const out: RowContext = {}
+    if (projections.contextWindow !== undefined) out.window = projections.contextWindow
+    if (projections.systemTokens !== undefined) out.system = projections.systemTokens
+    if (projections.toolsTokens !== undefined) out.tools = projections.toolsTokens
+    if (projections.messageTokens !== undefined) out.messages = projections.messageTokens
+    return Object.keys(out).length === 0 ? undefined : out
   }
 
   /**
@@ -883,6 +956,7 @@ export function apply(ctx: Context): void {
       }
       const purpose = purposeFor(id)
       const projections = projectionsFor(valuesById.get(id))
+      const context = contextFor(projections)
       const observed = eventRows.find(row => row.id === id)
       if (observed !== undefined) {
         const row: TabRow = {
@@ -903,6 +977,7 @@ export function apply(ctx: Context): void {
         if (observed.endedAt !== undefined) row.endedAt = observed.endedAt
         if (purpose !== undefined) row.purpose = purpose
         if (projections.tokens !== undefined) row.tokens = projections.tokens
+        if (context !== undefined) row.ctx = context
         if (projections.settledMs !== undefined) row.settledMs = projections.settledMs
         if (projections.activeSince !== undefined) row.activeSince = projections.activeSince
         if (projections.activeThrough !== undefined) row.activeThrough = projections.activeThrough
@@ -925,6 +1000,7 @@ export function apply(ctx: Context): void {
         }
         if (purpose !== undefined) row.purpose = purpose
         if (projections.tokens !== undefined) row.tokens = projections.tokens
+        if (context !== undefined) row.ctx = context
         if (projections.settledMs !== undefined) row.settledMs = projections.settledMs
         if (projections.activeSince !== undefined) row.activeSince = projections.activeSince
         if (projections.activeThrough !== undefined) row.activeThrough = projections.activeThrough
@@ -935,6 +1011,7 @@ export function apply(ctx: Context): void {
       if (seen.has(observed.id)) continue
       const purpose = purposeFor(observed.id)
       const projections = projectionsFor(valuesById.get(observed.id))
+      const context = contextFor(projections)
       const row: TabRow = {
         id: observed.id,
         depth: 0,
@@ -949,6 +1026,7 @@ export function apply(ctx: Context): void {
       if (observed.endedAt !== undefined) row.endedAt = observed.endedAt
       if (purpose !== undefined) row.purpose = purpose
       if (projections.tokens !== undefined) row.tokens = projections.tokens
+      if (context !== undefined) row.ctx = context
       if (projections.settledMs !== undefined) row.settledMs = projections.settledMs
       if (projections.activeSince !== undefined) row.activeSince = projections.activeSince
       if (projections.activeThrough !== undefined) row.activeThrough = projections.activeThrough

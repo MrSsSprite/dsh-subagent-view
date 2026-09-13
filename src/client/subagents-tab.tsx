@@ -34,6 +34,26 @@ interface AncestorRow {
   isCurrent: boolean
 }
 
+/**
+ * Current context-window composition of one row's session, mirrored from the
+ * node half's `RowContext` (the two halves cannot share a module — DSH.md §3).
+ * Members are omitted rather than set to undefined.
+ *
+ * This is the CURRENT window, not the cumulative lifetime usage in
+ * {@link TabRow.tokens}; the two are different quantities and are rendered
+ * side by side on purpose.
+ */
+interface RowContext {
+  /** Context-window capacity in tokens (the occupancy denominator). */
+  window?: number
+  /** Heuristic tokens of the system prompt. */
+  system?: number
+  /** Heuristic tokens of the tool definitions. */
+  tools?: number
+  /** Heuristic tokens of the conversation surface. */
+  messages?: number
+}
+
 interface TabRow {
   id: string
   label?: string
@@ -52,7 +72,10 @@ interface TabRow {
   activity?: string
   reason?: string
   purpose?: string
+  /** Cumulative lifetime tokens across every turn (not current occupancy). */
   tokens?: number
+  /** Current context-window composition; absent when the host could not read it. */
+  ctx?: RowContext
   settledMs?: number
   activeSince?: number
   activeThrough?: number
@@ -175,6 +198,141 @@ function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
+}
+
+/**
+ * A share of the bar's denominator as text. The value is rounded to a tenth of
+ * a percent FIRST, so what is displayed can never disagree with the `0` it
+ * would otherwise round to: a non-zero share below the resolution reports as
+ * `0.05%` rather than a misleading `0%`, and an exact zero stays `0%`.
+ */
+function fmtPercent(tokens: number, total: number): string {
+  if (total <= 0 || tokens <= 0) return '0%'
+  // Rounding to tenths first is what keeps every non-zero share honest: a share
+  // that a whole-percent reading would collapse to "0%" (0.08%, or 0.28% for a
+  // 2.8k system prompt on a 1M window) still shows its own magnitude, while a
+  // share at or above a tenth of a percent reads naturally as a whole percent.
+  const tenths = Math.round(tokens / total * 1000) / 10
+  // Below 1% the tenth is only a rounding artefact, so show the real
+  // hundredth (0.08% for an 800-token prompt on a 1M window) rather than
+  // presenting 0.1% as if it were a measured tenth.
+  if (tenths >= 1) return `${tenths.toFixed(1).replace(/\.0$/, '')}%`
+  if (tenths > 0) return `${(Math.round(tokens / total * 10000) / 100).toFixed(2)}%`
+  // Below the resolution (under 0.005%): never print a bare "0%" beside a
+  // non-zero count — report that the share is under the resolution instead.
+  return '<0.01%'
+}
+
+// ---- context bar ----
+
+/** Segment identity and its tint class; the array order is the tie-break order. */
+type ContextKey = 'system' | 'tools' | 'messages' | 'free'
+
+const CONTEXT_ROWS: readonly { key: ContextKey; label: string; cls: string }[] = [
+  { key: 'system', label: 'System', cls: 'sat-context-system' },
+  { key: 'tools', label: 'Tools', cls: 'sat-context-tools' },
+  { key: 'messages', label: 'Messages', cls: 'sat-context-messages' },
+  { key: 'free', label: 'Free', cls: 'sat-context-free' },
+]
+
+interface ContextSegment {
+  key: ContextKey
+  /** Tint class from {@link CONTEXT_ROWS}, shared by the segment and its swatch. */
+  cls: string
+  label: string
+  tokens: number
+  /** Share of the denominator, 0-100. */
+  width: number
+}
+
+/**
+ * The context bar: one segment per type of context occupying the session's
+ * context window, plus the free remainder, all drawn on one scale
+ * (`contextWindow` when known, otherwise the usage sum).
+ *
+ * **Ordering rule (load-bearing):** segments are graded by size, biggest
+ * first, with ties broken by the fixed class order in {@link CONTEXT_ROWS} so
+ * the layout is deterministic. The *free* remainder is then pinned to the last
+ * position: the user's `bigger on the left` applies to the context types, and
+ * the remaining window is the tail of the rail by definition. Colors are the
+ * platform `ContextMeter` tints (see the `.sat-context-*` rules).
+ *
+ * Renders nothing when there is nothing measurable: every class is zero (a
+ * session with no token activity yet, where a full-width "free" rail would
+ * claim a measurement that was never taken), or the capacity is unknown AND
+ * nothing occupies it. It also renders no *free* segment when the capacity is
+ * unknown — an invented remainder would be a lie.
+ */
+function ContextBar({ ctx }: { ctx: RowContext }): ReactElement | null {
+  const system = ctx.system ?? 0
+  const tools = ctx.tools ?? 0
+  const messages = ctx.messages ?? 0
+  const usage = system + tools + messages
+  // Nothing is occupying the window, so there is no composition to show.
+  if (usage <= 0) return null
+  const free = ctx.window === undefined ? undefined : Math.max(0, ctx.window - usage)
+  // Denominator: the real capacity when the provider reported one, otherwise
+  // what is known to be occupied. Never zero — the bar would be meaningless.
+  const total = ctx.window ?? usage
+  if (total <= 0) return null
+
+  const candidates: ContextSegment[] = CONTEXT_ROWS
+    .map((row): ContextSegment | undefined => {
+      const tokens = row.key === 'free'
+        ? free
+        : row.key === 'system' ? system : row.key === 'tools' ? tools : messages
+      if (tokens === undefined || tokens <= 0) return undefined
+      return {
+        key: row.key,
+        cls: row.cls,
+        label: row.label,
+        tokens,
+        width: Math.min(100, tokens / total * 100),
+      }
+    })
+    .filter((segment): segment is ContextSegment => segment !== undefined)
+  if (candidates.length === 0) return null
+
+  const order = new Map(CONTEXT_ROWS.map((row, index) => [row.key, index] as const))
+  const segments = [...candidates].sort((left, right) =>
+    right.tokens - left.tokens || (order.get(left.key) ?? 0) - (order.get(right.key) ?? 0),
+  )
+  // Free is the tail regardless of its size (see the ordering rule above).
+  const freeIndex = segments.findIndex(segment => segment.key === 'free')
+  if (freeIndex >= 0 && freeIndex !== segments.length - 1) {
+    const [freeSegment] = segments.splice(freeIndex, 1)
+    if (freeSegment !== undefined) segments.push(freeSegment)
+  }
+
+  const describe = (segment: ContextSegment): string =>
+    `${segment.label} ${fmtTokens(segment.tokens)} (${fmtPercent(segment.tokens, total)})`
+
+  return (
+    <div className="sat-context">
+      <div
+        className="sat-context-bar"
+        role="img"
+        aria-label={`Context: ${segments.map(describe).join(', ')}`}
+      >
+        {segments.map(segment => (
+          <span
+            key={segment.key}
+            className={`sat-context-seg ${segment.cls}`}
+            style={{ width: `${segment.width}%` }}
+            title={describe(segment)}
+          />
+        ))}
+      </div>
+      <div className="sat-context-legend">
+        {segments.map(segment => (
+          <span key={segment.key} className="sat-context-legend-item">
+            <span className={`sat-context-swatch ${segment.cls}`} aria-hidden="true" />
+            {segment.label} {fmtTokens(segment.tokens)} {fmtPercent(segment.tokens, total)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function activeMsFor(row: TabRow, now: number): number | undefined {
@@ -433,6 +591,7 @@ export function SubagentsView(props: TabProps): ReactElement {
             </button>
           </span>
         </div>
+        {row.ctx !== undefined ? <ContextBar ctx={row.ctx} /> : null}
         {typeof row.purpose === 'string' && row.purpose !== ''
           ? <div className="sat-purpose" title={row.purpose}>{row.purpose}</div>
           : null}

@@ -85,9 +85,16 @@ and ties follow registration order.
   entry (`order: 20`, description *Live subagent runs for the selected session*). Its body is the
   monitor card, filling the pane, with no click-to-collapse affordance (there is nothing to
   collapse inside a tab).
-- **Conversation Subagents view.** The `conversation.view` tab, unchanged: its own poll of the
-  host's `/api/subagent-view/tab` route, rendering the same `SubagentTree`/`ArchivedFolder`
-  components as the other surfaces.
+- **Conversation Subagents view.** The `conversation.view` tab: its own poll of the host's
+  `/api/subagent-view/tab` route, rendering the same `SubagentTree`/`ArchivedFolder` components as
+  the other surfaces.
+- **Context bar.** Each row in the conversation Subagents view draws the context its subagent is
+  currently holding: one colored segment per type of context (system prompt, tool definitions,
+  conversation), sorted biggest-first, plus the free remainder of the context window — all on one
+  scale, so the free segment answers *how much room is left* at a glance. A legend under the bar
+  gives each segment's token count and share of the window. Rows whose context the host cannot read
+  (a subagent that never ran a request, or an unreadable projection row) simply draw no bar, and the
+  bar never affects a row's status or the counts.
 - **Live statuses.** Each row shows a status dot and duration: running (animated blue),
   completed (green), error (red), interrupted/token-limit/refused (amber), and history-only
   rows (gray).
@@ -306,6 +313,30 @@ list (rows hidden via *Clear finished* are excluded).
 
 Completed one-shot subagents keep the green `completed` dot and Done count, but they are
 listed inside the **Archived** folder at the bottom of the list rather than in the main tree.
+
+## Context bar legend
+
+The context bar on a conversation-view row is drawn on the subagent's own context window (the
+capacity the provider reported for its route). Its segments are sorted biggest-first and the free
+remainder is always the last segment:
+
+| Segment | Meaning | Color |
+| --- | --- | --- |
+| System | The system prompt currently in the window | Amber |
+| Tools | The tool definitions sent with each request | Green |
+| Messages | The conversation surface (prompts, replies, tool results) | Blue |
+| Free | Window capacity minus the three above | Neutral gray |
+
+The three usage types are bright and far apart in hue, so each is identifiable at a glance, and
+**gray means free space and nothing else** — an earlier revision drew the system prompt gray, which
+read as a second "free" segment. The free segment is an opaque gray rather than a translucent
+hairline, so the remainder is visible as a segment in its own right.
+
+When the provider has not reported a capacity, the bar falls back to the three usage segments alone
+and draws **no** free segment — an invented remainder would be a guess, not a measurement. A share
+below 1% keeps its decimals (`0.28%`) instead of rounding to a misleading `0%`; below 0.01% it reads
+`<0.01%`. A class whose count is zero gets no segment at all, and a row with no readable context
+draws nothing — the bar never occupies space it cannot fill with a measurement.
 
 ## Development
 

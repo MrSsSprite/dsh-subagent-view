@@ -428,6 +428,41 @@ export function apply(ctx: ClientContext): void {
   font-size: 11px; line-height: 16px;
   margin-top: 2px; padding-left: 22px;
 }
+/* ---- context bar (conversation Subagents view) ----
+   One segment per type of context occupying the row's context window plus the
+   free remainder, all drawn on one scale. The tints mirror the platform's
+   composer ContextMeter so the app speaks a single color language; every one
+   carries a fallback, as the rest of this sheet does. */
+.sat-context {
+  margin-top: 4px; padding-left: 22px;
+  font-size: 11px; line-height: 16px;
+}
+.sat-context-bar {
+  display: flex; gap: 1px; height: 6px; overflow: hidden;
+  border-radius: 999px;
+  background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04));
+}
+.sat-context-seg { flex: 0 0 auto; min-width: 2px; height: 100%; border-radius: 1px; }
+/* The three usage types are BRIGHT and hue-separated (amber ~38deg, green
+   ~142deg, blue ~215deg) so each reads as its own kind of context at a glance.
+   System is deliberately NOT a neutral any more: as a bluish-gray it read as a
+   second gray beside the free remainder, which is the confusing part. */
+.sat-context-system { background: var(--dsw-static-amber-500, #f59e0b); }
+.sat-context-tools { background: var(--dsw-static-green-400, #4ed17e); }
+.sat-context-messages { background: var(--dsw-static-blue-450, #4d93f8); }
+/* Free is the window's remainder, so IT is the neutral gray the three usage
+   types are distinguished against — and an OPAQUE one: the hairline alias this
+   first used (border-l3) is ~12% alpha, which rendered the remainder as
+   barely-visible background rather than as a gray segment. */
+.sat-context-free { background: var(--dsw-static-neutral-400, #a2a4a6); }
+.sat-context-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  margin-top: 3px;
+  color: var(--dsw-alias-label-tertiary, #94a3b8);
+  font-variant-numeric: tabular-nums;
+}
+.sat-context-legend-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.sat-context-swatch { width: 8px; height: 8px; flex: none; border-radius: 2px; }
 .sat-popover {
   position: absolute; right: 8px; top: 100%; z-index: 20;
   margin-top: 4px; min-width: 240px; max-width: 320px;
