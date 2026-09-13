@@ -9,10 +9,10 @@
  *  - stage two registers the body into the keyed `sidebar.right.pane.tab` seat
  *    under that same `id`, not under the kind.
  *
- * The body is a second host of the shared monitor in `monitor.tsx` — same
- * store, same poller, same panel card as the left-sidebar docked panel — with
- * the two layout deviations the integration contract requires: it fills the tab
- * pane, and its header carries no click-to-collapse affordance.
+ * The body is the only remaining host of the shared monitor in `monitor.tsx` —
+ * same store, same poller, same panel card the retired left-sidebar panel used
+ * to draw — filling the tab pane, with a header that carries no
+ * click-to-collapse affordance (a tab has no collapsed state).
  *
  * Both imports below are type-only, so the built client bundle gains no runtime
  * require on the rightbar package (no second copy of the tab system) and the
@@ -68,5 +68,5 @@ export function SubagentRightbarTab({
 }: PropsRuntime<'sidebar.right.pane.tab'>): ReactElement {
   useMonitorSession(sessionId)
   useMonitorPolling()
-  return <SubagentMonitorPanel variant="tab" useSessions={useSessions} />
+  return <SubagentMonitorPanel useSessions={useSessions} />
 }

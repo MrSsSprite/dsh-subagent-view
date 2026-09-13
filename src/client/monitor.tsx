@@ -2,13 +2,12 @@
  * subagent-view, browser half: the shared subagent monitor.
  *
  * One module-local store, one poller and one panel component serve BOTH hosts
- * of the monitor — the left-sidebar docked bar/panel (`panel.tsx`, slot
- * `sidebar.footer.action`) and the right-sidebar tab body (`rightbar.tsx`,
- * keyed slot `sidebar.right.pane.tab`). Nothing here is host-specific: the
- * hosts differ only in the chrome around the panel (bar + rail + open flag on
- * the left; the platform's tab strip on the right) and in the two layout
- * deviations the rightbar contract requires (fill the pane, no
- * click-to-collapse header).
+ * of the monitor state — the read-only left-sidebar status bar (`bar.tsx`, slot
+ * `sidebar.footer.action`) and the right-sidebar tab body (`rightbar.tsx`, keyed
+ * slot `sidebar.right.pane.tab`). Nothing here is host-specific: the hosts
+ * differ only in what they draw — the bar renders the counts line alone, while
+ * the tab renders the panel card, which is the card's single remaining host
+ * since the left sidebar's expandable panel was retired.
  *
  * The panel polls the host half's snapshot route once per second while at least
  * one host is mounted, so a page refresh recovers everything without any model
@@ -59,7 +58,6 @@ export interface MonitorState {
   sessionId: string | undefined
   now: number
   rows: MonitorRow[]
-  open: boolean
   hidden: string[]
   /** Ids of branches whose children are shown; empty = every branch collapsed. */
   expanded: ReadonlySet<string>
@@ -72,12 +70,10 @@ let state: MonitorState = {
   sessionId: undefined,
   now: Date.now(),
   rows: [],
-  open: false,
   hidden: [],
   expanded: new Set(),
   archiveOpen: false,
 }
-let autoOpened = false
 
 export const commit = (patch: Partial<MonitorState>): void => {
   state = { ...state, ...patch }
@@ -90,13 +86,6 @@ const subscribe = (listener: () => void): (() => void) => {
 const getSnapshot = (): MonitorState => state
 
 export const useMonitor = (): MonitorState => useSyncExternalStore(subscribe, getSnapshot)
-
-/** Whether the left host's panel has already auto-opened once (page lifetime). */
-export const claimAutoOpen = (): boolean => {
-  if (autoOpened) return false
-  autoOpened = true
-  return true
-}
 
 export async function refresh(sessionId: string): Promise<void> {
   try {
@@ -332,31 +321,22 @@ export function rowLabel(row: MonitorRow): string {
 export interface SubagentMonitorPanelProps {
   /** Session kit hook, used for the Back-to-main fact only. */
   useSessions: UseSessions
-  /**
-   * `left` — the docked card: auto height with the min/max clamp, header
-   * click collapses the docked panel.
-   * `tab` — the right-sidebar body: fills the pane (deviation D-2 of
-   * docs/RIGHTBAR-INTEGRATION-SPEC.md) and the header carries no click
-   * affordance (D-3).
-   */
-  variant: 'left' | 'tab'
-  /** Left host only: collapse the docked panel when the header is clicked. */
-  onCollapse?: () => void
 }
 
 /**
  * The monitor panel: header (title, optional Back, running count), the
  * disclosure forest with its Archived folder (or the empty state), and the
- * footer actions. Both hosts render exactly this component so their content
- * and behaviour cannot drift.
+ * footer actions.
  *
- * The component is presentational on purpose: each HOST owns the shared
- * lifecycle (`useMonitorSession` + `useMonitorPolling`) at its own top level,
- * so the left bar keeps polling while its panel is closed, and each host's
- * mount/unmount contributes one entry to the poller's reference count.
+ * Its single host is the right-sidebar tab body (`rightbar.tsx`), so the card
+ * fills the pane and its header carries no click-to-collapse affordance (a tab
+ * has no collapsed state). The component is presentational on purpose: the HOST
+ * owns the shared lifecycle (`useMonitorSession` + `useMonitorPolling`) at its
+ * own top level, so each host's mount/unmount contributes one entry to the
+ * poller's reference count.
  */
 export function SubagentMonitorPanel(props: SubagentMonitorPanelProps): ReactElement {
-  const { useSessions, variant, onCollapse } = props
+  const { useSessions } = props
   const monitor = useMonitor()
   const subagentParent = useSessions((select: SessionListState) => (
     select.currentAddress === undefined ? undefined : select.currentAddress.parentSessionId
@@ -464,14 +444,9 @@ export function SubagentMonitorPanel(props: SubagentMonitorPanelProps): ReactEle
     )
   }
 
-  const collapsible = variant === 'left' && onCollapse !== undefined
-
   return (
-    <div className={`sav-panel${variant === 'tab' ? ' sav-panel-tab' : ''}`}>
-      <div
-        className={`sav-panel-header${collapsible ? '' : ' sav-panel-header-tab'}`}
-        {...(collapsible ? { title: 'Collapse panel', onClick: onCollapse } : {})}
-      >
+    <div className="sav-panel">
+      <div className="sav-panel-header">
         <span className="sav-panel-title">Subagents</span>
         {subagentParent !== undefined && sessionsSvc !== undefined
           ? (

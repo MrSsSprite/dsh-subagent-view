@@ -120,7 +120,7 @@ const STATUS: Record<string, StatusMeta> = {
   refusal: { cls: 'sat-dot-warn', label: 'Refused' },
 }
 
-// ---- status marker: DSH-native StateDot spec (copied from panel.tsx) ----
+// ---- status marker: DSH-native StateDot spec (copied from monitor.tsx) ----
 // ongoing = pixel-art chase around the 3x3 outer ring; terminal states =
 // solid core + 10% same-color halo.
 

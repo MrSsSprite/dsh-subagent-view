@@ -2,12 +2,16 @@
  * subagent-view, browser half entry: the plugin body only (no JSX — tsdown
  * pins the client bundle entry to src/client/index.ts). Two hosts of one
  * monitor:
- *  - the docked bar and panel in the left sidebar (`./panel.tsx`, seat
- *    `sidebar.footer.action`), and
+ *  - the read-only status bar in the left sidebar (`./bar.tsx`, seat
+ *    `sidebar.footer.action`) — counts only, no panel and nothing to open, and
  *  - a right-sidebar tab type (`./rightbar.tsx`: stage one into
  *    `ctx.sidebarRightTabs`, stage two into the keyed `sidebar.right.pane.tab`
- *    seat), sharing one store, one poller and one panel card (`./monitor.tsx`).
- * The conversation's Subagents view (`./subagents-tab.tsx`) is unchanged.
+ *    seat), which is now the only host of the panel card.
+ * Both share one store and one poller (`./monitor.tsx`). The conversation's
+ * Subagents view (`./subagents-tab.tsx`) is unchanged.
+ *
+ * The left sidebar's expandable panel was retired in this revision; the
+ * retirement and what it supersedes are recorded in docs/ERRATA-0.1.5.md §E-8.
  */
 // The browser half's type homes under DSH 0.1.5-rc.2: the client context is
 // `@deepseek-ai/cordis`, while `SessionId` and `SubagentAddress` are reached
@@ -25,11 +29,15 @@ import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import { SubagentViewBarPanel, setSessionsService, type MonitorSessionsService } from './panel'
+import { SubagentViewBar } from './bar'
+import { setSessionsService, type MonitorSessionsService } from './monitor'
 import { SubagentsView } from './subagents-tab'
 import { SubagentRightbarTab, subagentTabDefinition, SUBAGENT_VIEW_ID } from './rightbar'
 
-export const inject = ['slots', 'sessions', 'layout']
+// `layout` left this list with the left panel's rail button: it was read in
+// exactly one place (`ctx.layout.toggleSidebar()`) and nothing reads it now.
+// Every listed service is a hard requirement of this fiber (§11 rule 4).
+export const inject = ['slots', 'sessions']
 
 export function apply(ctx: ClientContext): void {
   // Loose capture of the sessions service: the panel only needs open() and
@@ -47,6 +55,8 @@ export function apply(ctx: ClientContext): void {
   font-size: 12px;
   color: var(--dsw-alias-label-primary, inherit);
 }
+/* The docked left-sidebar status bar. Display only — the monitor lives in the
+   right-sidebar tab — so it carries no hover, pointer or disclosure affordance. */
 .sav-bar {
   flex: none; width: 100%;
   display: flex; align-items: center; gap: 6px;
@@ -54,9 +64,7 @@ export function apply(ctx: ClientContext): void {
   border: none; border-radius: 8px;
   background: transparent; color: var(--dsw-alias-label-primary, inherit);
   font-family: inherit; font-size: 12px; line-height: 18px;
-  cursor: pointer; text-align: left;
 }
-.sav-bar:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.05)); }
 .sav-bar-label {
   flex: none; font-weight: 500;
   color: var(--dsw-alias-label-primary, inherit);
@@ -72,61 +80,26 @@ export function apply(ctx: ClientContext): void {
 .sav-count-seg { display: inline-flex; align-items: center; gap: 3px; }
 .sav-count-sep { color: var(--dsw-alias-label-tertiary, #94a3b8); }
 .sav-count-num { font-variant-numeric: tabular-nums; }
-.sav-bar-chevron {
-  flex: none; color: var(--dsw-alias-label-tertiary, #94a3b8);
-  font-size: 10px; transition: transform var(--ds-transition-duration-slow, 160ms) var(--ds-ease-in-out, ease-in-out);
-}
-.sav-bar-chevron-open { transform: rotate(180deg); }
-.sav-rail-btn {
-  position: relative; display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border: none; border-radius: 8px;
-  background: transparent; color: var(--dsw-alias-label-primary, inherit);
-  cursor: pointer;
-}
-.sav-rail-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.05)); }
-.sav-rail-icon { fill: currentColor; opacity: 0.8; }
-.sav-rail-badge {
-  position: absolute; top: -2px; right: -4px;
-  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
-  background: var(--dsw-alias-brand-primary, #2563eb); color: #ffffff;
-  font-size: 10px; line-height: 16px; font-weight: 600;
-  display: inline-flex; align-items: center; justify-content: center;
-  pointer-events: none;
-}
+/* The monitor card. Its single host is the right-sidebar tab body, so the box
+   fills the pane (the row list scrolls inside the tab) and the visual tokens
+   (background, border, radius, shadow, overflow) come from the same block. */
 .sav-panel {
-  flex: none; width: 100%; min-width: 0;
+  flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; min-height: 0;
   display: flex; flex-direction: column;
-  /* Auto-size to content, clamped between a floor that keeps the empty state
-     ("No subagent activity in this session") legible and the former fixed
-     height — now the ceiling — so a long list never fills the whole bar. */
-  height: auto; min-height: 140px; max-height: min(60vh, 480px);
-  margin-bottom: 4px;
   background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #ffffff));
   border: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.08));
   border-radius: 10px;
   box-shadow: var(--dsw-shadow-lv1, 0 2px 4px rgba(15, 23, 42, 0.04));
   overflow: hidden;
 }
+/* No click-to-collapse: a tab has no collapsed state, so the header must not
+   advertise one (no pointer cursor, no hover fill). */
 .sav-panel-header {
   flex: none; display: flex; align-items: center; gap: 6px;
   padding: 7px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(15, 23, 42, 0.06));
   user-select: none;
-  cursor: pointer;
 }
-.sav-panel-header:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(15, 23, 42, 0.04)); }
-/* Right-sidebar tab body (deviation D-2): the same card fills the pane instead
-   of floating inside the left column, so the row list scrolls inside the tab.
-   The visual tokens (background, border, radius, shadow, overflow) are the
-   .sav-panel ones; only the box's geometry changes. */
-.sav-panel-tab {
-  flex: 1 1 auto; height: 100%; min-height: 0;
-  max-height: none; margin-bottom: 0;
-}
-/* Deviation D-3: inside a tab the header has no collapse action, so it must not
-   advertise one. */
-.sav-panel-header-tab { cursor: default; }
-.sav-panel-header-tab:hover { background: transparent; }
 .sav-panel-title { flex: none; font-weight: 600; font-size: 13px; line-height: 18px; }
 .sav-panel-running {
   flex: none; color: var(--dsw-alias-brand-primary, #2563eb); font-size: 11px;
@@ -509,6 +482,9 @@ export function apply(ctx: ClientContext): void {
     return () => { tag.remove() }
   }, 'subagent-view: styles')
 
+  // The docked left-sidebar status bar: counts only, no injected business face
+  // (the rail button that needed `ctx.layout.toggleSidebar()` is gone) and no
+  // click affordance — the monitor itself is the right-sidebar tab below.
   ctx.slots.inject(
     'sidebar.footer.action',
     () => ctx.slots.register(
@@ -516,16 +492,14 @@ export function apply(ctx: ClientContext): void {
         name: 'sidebar.footer.action',
         id: 'subagent-view',
         order: 100,
-        inject: () => ({ toggleSidebar: () => ctx.layout.toggleSidebar() }),
       },
-      SubagentViewBarPanel,
+      SubagentViewBar,
     ),
   )
 
   // The client sessions service is typed as the host-side `SessionStore` here;
   // cast to the narrow face the tab consumes: the breadcrumb's `open` plus the
-  // row action's `openSubagent` (both address a session the same way the
-  // sidebar panel does).
+  // row action's `openSubagent`.
   const sessions = ctx.sessions as unknown as MonitorSessionsService
   ctx.slots.inject(
     'conversation.view',
@@ -549,7 +523,7 @@ export function apply(ctx: ClientContext): void {
   // `ctx.inject` is cordis's inject-scoped plugin form: the callback is unloaded
   // and re-run whenever a required service changes, and on a deployment without
   // `@deepseek-ai/dsh-client-ui-sidebar-right` it simply never runs — the left
-  // bar/panel and the conversation Subagents view above stay unconditional, and
+  // status bar and the conversation Subagents view above stay unconditional, and
   // no fiber is left pending (a pending entry is a fatal boot error in the
   // 0.1.5-rc.2 shell: `assertEntriesActive` reports
   // "web boot: N entries did not activate … (waiting for services: …)").

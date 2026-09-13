@@ -123,3 +123,74 @@ file, not in the body — which is why this file exists rather than a set of in-
 
 Line/byte figures quoted above were produced with `wc -l`, `wc -c`, `head -c <bytes> | shasum -a 256`
 and `shasum -a 256` against the files as they stand in this commit.
+
+## E-8 · The left-sidebar panel is retired (user decision, supersedes spec D-1/R12.1)
+
+- Scope: the left sidebar's **expandable panel** is removed; the docked `sidebar.footer.action` entry
+  survives as a **read-only counts bar** (no click, no chevron, no rail button, no desktop auto-open).
+  The right-sidebar *Subagents* tab becomes the only host of the panel card.
+- Why a retirement was needed at all: two hosts rendered the same card over one store, and the right
+  tab made the left panel redundant — the user asked for the concise pre-expansion bar to stay and
+  the expansion to go.
+- Why this is an **errata** entry and not a body edit: the requirements it contradicts are inside
+  byte-pinned documents. Every prefix named below still verifies, because this pass appended instead
+  of rewriting. **Do not "fix" the spec or the review to match the tree.**
+
+| # | claim as filed | measured truth after this pass |
+|---|---|---|
+| 12 | `docs/RIGHTBAR-INTEGRATION-SPEC.md` §1 **D-1**: "**KEEP** the existing left-sidebar docked bar + expandable panel unchanged … rail mode and all" | **Superseded by the user's decision.** Surface 1 is now a read-only bar: `src/client/bar.tsx` renders `label + counts` and nothing else. The reason D-1 gave still constrains the *bar* — the rejected "open the right tab from the left bar" alternative stays rejected, so the bar was made non-interactive rather than repurposed |
+| 13 | same file **R12.1**: "`sidebar.footer.action` (`id: 'subagent-view'`, `order: 100`, `inject` = `toggleSidebar`) keeps its registration and its current behaviour … including the bar + panel + rail mode" | **Partly superseded.** The registration and its `id`/`order` are unchanged; the `inject` = `toggleSidebar` factory and the rail mode are gone with the button that was their only reader. `.verify/rightbar-register.mjs` and `.verify/left-bar-contract.mjs` assert the registration carries **no** `inject` factory |
+| 14 | `docs/REVIEW-RIGHTBAR.md` §3 row 5: "`src/client/panel.tsx` keeps the rail button, the docked bar, the desktop auto-open and the click-to-collapse header" | **Superseded.** `panel.tsx` is deleted; the file is `src/client/bar.tsx` and keeps only the bar. The review remains correct *as the review of the revision it judged* |
+| 15 | `README.md` said surface 1 was unchanged and surface 3 was "new"; `DSH.md` §1 listed a "docked bar + expandable panel" and `panel.tsx`, and its §8 branch note said "no commit implements" the retirement | **Corrected in place** (both are live documents): the surface tables, the Features and Platform-notes sections, the FAQ entries, the `panel.tsx` references and the branch note now describe the retired state. The `docs/` bodies were left frozen |
+
+**What else moved with it (behaviour, not just files):**
+
+| # | item | detail |
+|---|---|---|
+| 16 | exported `inject` array | `['slots','sessions','layout']` → **`['slots','sessions']`**. `ctx.layout` had exactly one reader — `ctx.layout.toggleSidebar()` on the rail button (`src/client/index.ts:519` before the change) — so the service became dead the moment the button went. A declared-and-required service nothing reads is the same defect as an unguarded read, from the other side (§7 trap 1 / §11 rule 4). `.verify/rightbar-inject-guard.mjs` now asserts the fiber activates with `layout` **unprovided** |
+| 17 | `package.json` | `@deepseek-ai/dsh-client-ui-layout` removed from **`dsh.client.inject`** (7 → 6 ids), from `peerDependencies` and from `devDependencies`; `pnpm-lock.yaml` refreshed (173 entries, down one). `@deepseek-ai/dsh-client-ui-sidebar` is **kept** — the bar still occupies its `sidebar.footer.action` seat, and its type-only import still declares the owner props |
+| 18 | `docs/MIGRATION-0.1.5-rc.2.md` | Its `layout` rows (§7 change-list row 8 and the `package.json` reference) now describe a declaration this revision removed. The **body stays frozen**; this entry is the correction. Its C2 row (`SidebarFooterActionOwnerProps` unchanged at 0.1.5-rc.2) and R1's consumer counts are still accurate — the owner share still exists and is simply unread |
+| 19 | the harness suite (`.verify/`, gitignored, this machine only) | New `.verify/left-bar-contract.mjs`: executes the shipped bundle with a recording React and asserts (a) `inject === ['slots','sessions']`, (b) the footer entry has no `inject` factory, (c) the bar's element tree has **no** button/`onClick`/`href`/`role`/`tabIndex`, (d) the stylesheet has no `sav-rail*`/`sav-bar-chevron*`/`sav-panel-tab`/`sav-panel-header-tab` selector, (e) the bundle has no `toggleSidebar`/`ctx.layout`/`dsh-client-ui-layout` string. `rightbar-register.mjs` (R11.1/R12) and `rightbar-inject-guard.mjs` were updated to the new inject array and the layout-free context. Full suite re-run green |
+
+**Two consequences that are *not* verified, stated rather than implied:**
+
+1. **Mobile seeding is unobserved.** The retired left host also carried the `≤768px` guard that kept a
+   rightbar page from being auto-opened (the spec's `R8 D-4` deviation achieved "no mobile auto-open"
+   by leaving the panel closed, not by a platform switch). With that guard gone, a phone may now open
+   the seeded page where the rail button used to be the entry point. This is a layout/UX observation
+   that needs the live app (DSH.md §10 L10).
+2. **The bar's geometry in the 56px rail is unverified visually.** `wide` is still delivered to the
+   entry by the platform and is deliberately unread; the counts line ellipsizes in the narrow column.
+   `left-bar-contract.mjs` is structural only — it does not lay anything out (DSH.md §10 L9).
+
+**Deployment note.** Item 17 changes the **manifest**, so the running server (PID 36530, serving the
+profile copy) cannot pick it up by HMR: the profile needs `dsh plugin --profile web add "file:<repo>"`
+and then a `dsh web` restart. Until then the profile keeps serving the *previous* client half and the
+previous inject list, and the app shows the old expandable bar.
+
+## Fingerprints of this pass (E-8)
+
+Measured while writing this entry, with the retirement staged but **not committed**:
+
+| artifact | value |
+|---|---|
+| `HEAD` (unchanged by this pass) | `be10be3b1f33f9eb56258fbc6964fadbd0bb8730`, branch `retire-left-sidebar` (= `main`/`origin/main`) |
+| `lib/index.js` | `2f7bcda74ae0b8cc0e09e92ab0f1a93f1df67670faadeb945da3a09c4b71c0d3` — **unchanged**, as a client-only change requires |
+| `lib/client.js` | `febd441de6791b255cfa908179afbe6b570ac87dcd8b7978cff4b97966847460` (was `06729579…`) |
+| `package.json` | `1cd511a4ae461ab58522f47e96175be003d75f115e08b1bdbfea7fdcf4dc5551` (was `9aa13d2e…`) |
+| profile copy at `~/.dsh/profiles/web/node_modules/subagent-view` | `lib/index.js` `2f7bcda7…`, `lib/client.js` `06729579…`, `package.json` `89256ab9…` — **one revision behind**, and still carrying the 7-id inject list, until the reinstall above |
+| live server | PID 36530 on `127.0.0.1:3080`, still serving that stale copy |
+| build/typecheck | `pnpm install --lockfile-only && pnpm typecheck && pnpm build` all exit 0; `module-table.mjs` confirms the bundle still requires only the three seed words |
+
+Whole-file hashes of the two **live** documents this pass corrected in place (per E-6, those files
+are corrected rather than errata'd, so their current content is the record):
+
+| document | what changed | how to read it |
+|---|---|---|
+| `README.md` | surface table, Features, Platform notes, FAQ, the delivered-hash table | `git diff README.md`. **No pre-edit hash is recorded here on purpose** — this pass did not capture one, and inventing one would be exactly the error E-1 exists to correct |
+| `DSH.md` | §1/§2/§3/§5/§6/§8/§9/§10 and the measured-state header | `git diff DSH.md`; the file is untracked in git, so a commit must `git add DSH.md` to keep it |
+
+**The prefix property still holds.** `head -c 61392 docs/RIGHTBAR-INTEGRATION-SPEC.md | shasum -a 256`
+= `81054f11…`, `head -c 57299 docs/MIGRATION-0.1.5-rc.2.md | shasum -a 256` = `a8586bdb…` and
+`head -c 20466 docs/VERIFICATION-RIGHTBAR.md | shasum -a 256` = `938ec450…`, all re-verified after
+this append. Every correction in this entry is at the end of this file; no byte above it moved.
